@@ -12,5 +12,5 @@
   "main":"transparent-wrapper.js",
   "scripts": {
     "start": "node transparent-wrapper.js"
-  },
+  }
 }
