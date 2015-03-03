@@ -29,7 +29,7 @@ netServer.listen(8080,function(){
 });
 */
 
-var httpServer=https.createServer(function(req,res){
+var httpServer=http.createServer(function(req,res){
   console.log("HTTP Request Received");
   console.log(req.url);
   responseString="";
@@ -75,7 +75,7 @@ var httpServer=https.createServer(function(req,res){
 });
 
 httpServer.listen(port,function(){
-  console.log("Listening for HTTP on Port %i",port);
+  console.log("Listening for HTTP on Port ",port);
 });
 
 var intercept = function (options,data){
