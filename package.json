@@ -6,8 +6,11 @@
     "express": "^4.12.2",
     "socket.io": "^1.3.4"
   },
+  "engines": {
+    "node": "0.12.x"
+  },
+  "main":"transparent-wrapper.js"
   "scripts": {
     "start": "node transparent-wrapper.js"
   },
-  "main":"transparent-wrapper.js"
 }

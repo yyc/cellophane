@@ -5,6 +5,8 @@ var http=require("http");
 var url=require("url");
 
 var simperiumIDs=[];
+var port= process.env.PORT || 8080
+/*
 var netServer=net.createServer(function(clientSocket){
   console.log("Connection Established");
   clientSocket.on("data",function(data){
@@ -25,8 +27,9 @@ var netServer=net.createServer(function(clientSocket){
 netServer.listen(8080,function(){
   console.log("Listening for Socket Connections on Port 8080");
 });
+*/
 
-var httpServer=http.createServer(function(req,res){
+var httpServer=https.createServer(function(req,res){
   console.log("HTTP Request Received");
   console.log(req.url);
   responseString="";
@@ -71,8 +74,8 @@ var httpServer=http.createServer(function(req,res){
   
 });
 
-httpServer.listen(8001,function(){
-  console.log("Listening for HTTP on Port 8001");
+httpServer.listen(port,function(){
+  console.log("Listening for HTTP on Port %i",port);
 });
 
 var intercept = function (options,data){
@@ -93,6 +96,7 @@ httpSecureServer.listen(443,function(){
 
 
 
+/*
 //Admin Interface
 var express=require("express")();
 var adminhttp=require("http").Server(express);
@@ -110,4 +114,5 @@ express.get("/",function(req,res){
 adminhttp.listen(80,function(){
   console.log("Admin interface listening on port 80")
 })
+*/
 

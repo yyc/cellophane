@@ -6,7 +6,7 @@ function FindProxyForURL(url, host) {
         return "PROXY "+proxyhost+":8001";
       break;
       case "https:":
-        return "PROXY "+proxyhost+":443";
+        return "PROXY "+proxyhost+":80";
       break;
       case "ws:":
       case "wss:":
