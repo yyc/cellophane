@@ -1,5 +1,5 @@
 function FindProxyForURL(url, host) {
-    var proxyhost="192.168.1.164";
+    var proxyhost="obscure-sands-4331.herokuapp.com";
     if (dnsDomainIs(host, ".simperium.com") || shExpMatch(host, "(*.simperium.com|simperium.com)")){
       switch url.substring(0, 4):
       case "http:":

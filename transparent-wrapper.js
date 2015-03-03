@@ -107,7 +107,7 @@ express.get("/",function(req,res){
   res.sendFile(__dirname+"/index.html");
 });
 
-adminhttp.listen(3000,function(){
-  console.log("Admin interface listening on port 3000")
+adminhttp.listen(80,function(){
+  console.log("Admin interface listening on port 80")
 })
 
