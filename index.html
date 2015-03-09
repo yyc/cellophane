@@ -1,1 +1,71 @@
-Hello this is the admin page
+<html>
+  <head>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="http://code.jquery.com/jquery-2.1.3.min.js"></script>
+    <script>
+      var socket=io();
+      var text;
+      $(document).ready(function(){
+        $('#commands').submit(function(event){
+          event.preventDefault();
+          text=$("#command").val();
+//          $('#command').val("");
+          command=text.split(" ",1);
+          args=text.split(" ").slice(1);
+          socket.emit(command,args);
+          $("#console").append($("<li>").text(text+" | "));
+        });
+        socket.on("message",function(message){
+          $("#console").append($("<li>").text(message));
+        });
+        socket.on("reply",function(message){
+          $('#console li').last().append(message);
+        });
+        socket.on("listing",function(array){
+          for(var i in array){
+            $('#console li').last().append("<br />"+i+"=>"+JSON.stringify(array[i]));
+          }
+        });
+        socket.on("error",function(message){
+          $("#console").append($("<li>").text(message).addClass("error"));          
+        });
+      });
+    </script>
+    <style>
+      li{
+        list-style: none;
+        border: #ccc 1px solid;
+        margin-bottom: 2px;
+      }
+      li .error{
+        background-color: #ff8195;
+        border: #ff8195 1px solid;
+      }
+      #command{
+        width:400px
+      }
+      #console{
+        height: 300px;
+        overflow-y: scroll;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="console">
+      <ul>
+        
+      </ul>
+    </div>
+    <form id="commands">
+      <input type="text" id="command" autocomplete="off" />
+      <button type="submit">submit</button>
+    </form>
+    Usage:
+    <ul>
+      <li>list : Lists all users currently captured</li>
+      <li>add username password [appName apiKey]: Add a user to listen for</li>
+      <li>token accessToken username : associate an access Token with an added username
+      <li>delete username : stops listening for the user with the given username</li>
+    </ul>
+  </body>
+</html>
