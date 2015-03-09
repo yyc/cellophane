@@ -2,6 +2,7 @@ var express=require("express");
 var app=express();
 var router=express.Router();
 var http=require("http");
+var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
 var querystring=require("querystring");
@@ -36,7 +37,7 @@ var authorizeUser = function(options,callback){
 //Getting auth Requests
 app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   req.appName=req.params.appName;
-  req.method=req.params.method;
+  req.action=req.params.method;
   if(req.headers['x-simperium-token']){
     if(captureTokens[req.headers['x-simperium-token']]){
       //capture
@@ -45,7 +46,24 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
     else{
       //don't capture
       log("Passing along request by "+req.headers['x-simperium-token']+" to "+req.url);
-      res.end("alright");
+      var options = {
+        hostname: "api.simperium.com",
+        port: 443,
+        path: req.url,
+        method: req.method || "GET",
+        headers: {"x-simperium-token":req.headers['x-simperium-token']}
+      };
+      console.log(req.method);
+      remote=https.request(options,function(response){
+        res.statusCode=response.statusCode;
+        res.statusMessage=response.statusMessage;
+        response.pipe(res).on("end",function(){
+          res.end();
+        });
+      });
+      req.pipe(remote).on("end",function(){
+        remote.end();
+        });
     }
   }else{
     next();
@@ -55,7 +73,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   next();
 }).post(function(req,res,next){
   console.log("POST request detected");
-  if(req.method=="authorize"){
+  if(req.action=="authorize"){
     log("Simperium Auth Request Received");
     responseString="";
     req.on("data",function(data){
@@ -165,6 +183,7 @@ httpListener.listen(port,function(){
 });
 
 function log(message,objects){
+  message=JSON.stringify(message);
   if(objects){
     if(typeof objects=="object"){
       for(var key in objects){
