@@ -8,6 +8,7 @@ var io=require("socket.io")(httpListener);
 var querystring=require("querystring");
 var simperium=require("./simperium");
 var bodyParser=require("body-parser");
+var merge=require("./merge_recursively")
 
 /*
 var simperiumAppName = process.env.SIMPERIUM_APP_ID || "miles-secretaries-5c5";
@@ -24,7 +25,7 @@ var authorizeUser = function(options,callback){
   apiKey = options.apiKey || simperiumApiKey;
   appName = options.appName || simperiumAppName;
   var requestString="";
-    simperium.init(apiKey,appName,options.username,options.password,function(error,user){
+    simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
       if(error){
         callback(true,user);
       }else{
@@ -39,31 +40,37 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   req.appName=req.params.appName;
   req.action=req.params.method;
   if(req.headers['x-simperium-token']){
+    //This route should only match the api.simperium.com/1/appName/buckets method
     if(captureTokens[req.headers['x-simperium-token']]){
       //capture
-      next();
+      if(req.action="buckets"){
+        var user=simperium.getUserByToken(captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+        if(user){
+          buckets=user.buckets;
+          response={};
+          response.buckets=buckets;
+          res.write(JSON.stringify(response));
+        }else{
+          user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+          user.bucketList(user,function(err,response){
+            if(!err){
+              res.end(response);
+            }else{
+              res.end(response);
+              log(response);
+            }
+          });
+        }
+      }
     }
     else{
-      //don't capture
-      log("Passing along request by "+req.headers['x-simperium-token']+" to "+req.url);
       var options = {
         hostname: "api.simperium.com",
-        port: 443,
         path: req.url,
         method: req.method || "GET",
         headers: {"x-simperium-token":req.headers['x-simperium-token']}
       };
-      console.log(req.method);
-      remote=https.request(options,function(response){
-        res.statusCode=response.statusCode;
-        res.statusMessage=response.statusMessage;
-        response.pipe(res).on("end",function(){
-          res.end();
-        });
-      });
-      req.pipe(remote).on("end",function(){
-        remote.end();
-        });
+      passthrough(options,req,res);
     }
   }else{
     next();
@@ -73,6 +80,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   next();
 }).post(function(req,res,next){
   console.log("POST request detected");
+  //Only authorize is of any interest, we can let the rest through without parsing
   if(req.action=="authorize"){
     log("Simperium Auth Request Received");
     responseString="";
@@ -100,7 +108,17 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
       });
     });
   }
+  else{
+    var options = {
+      hostname: "auth.simperium.com",
+      path: req.url,
+      method: req.method || "POST",
+      headers: {"x-simperium-token":req.headers['x-simperium-api-key']}
+    };
+    passthrough(options,req,res);
+  }
 }).delete(function(req,res,next){
+  log("DELETE")
   next();
 });
 //modify objects
@@ -168,7 +186,7 @@ io.on('connection',function(socket){
         captureTokens[accessToken]=activeUsers[username];
         socket.emit("reply","Successfully associated token "+accessToken+" with user "+username+" (userid "+activeUsers[username]+")");
       }else{
-        socket.emit("error","The username is invalid");
+        socket.emit("error","Username not found! Please use the add command first");
       }
     }
   });
@@ -182,6 +200,30 @@ httpListener.listen(port,function(){
   log("Listening on port ",port);
 });
 
+function passthrough(opts,req,res,callback){
+    //don't capture
+  log("Passing along request by "+(req.headers['x-simperium-token']||req.headers['x-simperium-api-key'])+" to "+opts.path);
+  var options = {
+    hostname: "api.simperium.com",
+    port: 443,
+    method: "GET"
+  };
+  merge(options,opts);
+  console.log(req.method);
+  remote=https.request(options,function(response){
+    res.statusCode=response.statusCode;
+    res.statusMessage=response.statusMessage;
+    response.pipe(res).on("end",function(){
+      if(typeof callback == "function"){
+        callback();
+      }
+      res.end();
+    });
+  });
+  req.pipe(remote).on("end",function(){
+    remote.end();
+  });
+}
 function log(message,objects){
   message=JSON.stringify(message);
   if(objects){
@@ -198,22 +240,3 @@ function log(message,objects){
   io.emit("message",message);
 }
 
-/* curl -H 'X-Simperium-API-Key: 11afb5edc0b74c75b21518654f960d5f' -d '{"username":"yuchuan@tinkertanker.com", "password":"password"}' https://auth.simperium.com/1/miles-secretaries-5c5/authorize/
-
-curl -H 'X-Simperium-API-Key: 59d266d2e77d4c89a39fad5172a5f3f7' -d '{"username":"yyc478@gmail.com", "password":"password"}' http://localhost:5000/1/photo-wages-1b6/authorize/
-
-curl -H 'X-Simperium-Token: 8fed3276d8314e339403dd019f885d8f' https://api.simperium.com/1/miles-secretaries-5c5/buckets
-
-curl -H 'X-Simperium-Token: 8fed3276d8314e339403dd019f885d8f' https://api.simperium.com/1/miles-secretaries-5c5/eventschema/index?data=true
-
-
-var cb=function(err,resp){
-  if(!err){
-    console.log("Success!",resp);
-    }
-  else{
-    console.log("some error occurred");
-    console.log(err);
-  }
-}
-*/

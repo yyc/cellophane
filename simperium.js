@@ -1,23 +1,26 @@
 var https=require("https");
 var querystring=require("querystring");
+var merge=require("./merge_recursively")
 
 module.exports = {
-  Api: Api
+  authorize: authorize
   ,init: init
-  ,request : request,
-  bucket: Bucket
+  ,request : request
+  , bucket: Bucket
+  , getUserById: getUserById
+  , getUserByToken: getUserByToken
 }
 var authenticatedUsers={};
 var user2id={};
 var token2users={};
 
-function init(apiKey,appName,username,password,callback){
+function authorize(apiKey,appName,username,password,callback){
   if(authenticatedUsers[user2id[username]]){
     callback(false,authenticatedUsers[user2id[username]]);
   } else{
     var user=new User();
-    user.apiKey=apiKey,
     user.appName=appName;
+    user.apiKey=apiKey,
     request({
       hostname: "auth.simperium.com",
       path:"/1/"+appName+"/authorize/",
@@ -48,12 +51,19 @@ function init(apiKey,appName,username,password,callback){
 function Api(){
   
 }
+function init(appName,userId,accessToken){
+  var user=new User();
+  user.appName=appName;
+  user.userId=userId;
+  user.accessToken=accessToken;
+  authenticatedUsers[userId]=user;
+  return authenticatedUsers[userId];
+}
 function User(){
   var apiKey;
   var appName;
   var userId;
   var accessToken;
-  var clientTokens;
   var buckets;
   var bucketList;
 }
@@ -88,8 +98,22 @@ User.prototype.getBucket=function(bucketName){
     return this.buckets[bucketName];
   }
 }
-function getUser(accessToken){
-  return authenticatedUsers[token2users[accessToken]];
+function getUserByToken(accessToken,userId){
+  if(authenticatedUsers[token2users[accessToken]]){
+    return authenticatedUsers[token2users[accessToken]];
+  } else if(userId){
+    token2users[accessToken]=userId;
+    if(authenticatedUsers[userId]){
+      return authenticatedUsers[userId];
+    } else{
+      return false;
+    }
+  } else{
+    return false;
+  }
+}
+function getUserById(userId,appName,accessToken){
+    return authenticatedUsers[userId];
 }
 function Bucket(){
   var bucketName;
@@ -133,7 +157,7 @@ Bucket.prototype.request=function(options,callback){
     , method: "GET"
     , headers: {"x-simperium-token":this.accessToken}
   };
-  merge_recursively(defaults,options);
+  merge(defaults,options);
   request(defaults,callback)
 }
 Bucket.prototype.requestAllJson=function(options,callback,response){
@@ -143,7 +167,7 @@ Bucket.prototype.requestAllJson=function(options,callback,response){
   bucket=this;
   this.request(options,function(err,res){
     if(!err){
-      merge_recursively(response,res);
+      merge(response,res);
       if(res.mark){
         options.payload.mark=res.mark;
         bucket.requestAllJson(options,callback,response);
@@ -159,27 +183,6 @@ Bucket.prototype.requestAllJson=function(options,callback,response){
   },"json");
 }
 
-function merge_recursively(base,extend){
-  if(typeOf(extend)=="array"&&typeOf(base)=="array"){
-    base=base.concat(extend);
-  }
-  for(var key in extend){
-    if(typeOf(extend[key])=="array"&&typeOf(base[key])=="array"){
-      console.log("merging",base[key],"with",extend[key]);
-      base[key]=base[key].concat(extend[key]);
-    }
-    else if(typeOf(extend[key])=="object"&&typeOf(base[key])=="object"){
-      merge_recursively(base[key],extend[key]);
-    }
-    else{
-      base[key]=extend[key];
-    }
-  }
-}
-
-function typeOf(input) {
-	return ({}).toString.call(input).slice(8, -1).toLowerCase();
-}
 
 
 function request(options,callback,format){
