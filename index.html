@@ -9,7 +9,7 @@
         $('#commands').submit(function(event){
           event.preventDefault();
           text=$("#command").val();
-//          $('#command').val("");
+         $('#command').val("");
           command=text.split(" ",1);
           args=text.split(" ").slice(1);
           socket.emit(command,args);
@@ -27,7 +27,10 @@
           }
         });
         socket.on("error",function(message){
-          $("#console").append($("<li>").text(message).addClass("error"));          
+          $("#console").append($("<li>").text(message).addClass("error"));
+        });
+        $("#command").blur(function(){
+          $("#command").focus();
         });
       });
     </script>
@@ -42,7 +45,7 @@
         border: #ff8195 1px solid;
       }
       #command{
-        width:400px
+        width:400px;
       }
       #console{
         height: 300px;
@@ -59,13 +62,16 @@
     <form id="commands">
       <input type="text" id="command" autocomplete="off" />
       <button type="submit">submit</button>
+    <a href="#" onclick="$('#console').html('')">Clear Console</a>
     </form>
+
     Usage:
     <ul>
-      <li>list : Lists all users currently captured</li>
-      <li>add username password [appName apiKey]: Add a user to listen for</li>
-      <li>token accessToken username : associate an access Token with an added username
-      <li>delete username : stops listening for the user with the given username</li>
+      <li><a href="#" onclick="$('#command').val('list')">list</a> : Lists all users currently captured</li>
+      <li><a href="#" onclick="$('#command').val('add yyc478@gmail.com password')">add username password [appName apiKey]</a>: Add a user to listen for</li>
+      <li><a href="#" onclick="$('#command').val('token 335eaa6528a6402cb4c9a445d87b3d4b yyc478@gmail.com')">token accessToken username </a>: associate an access Token with an added username
+      <li><a href="#" onclick="$('#command').val('delete yyc478@gmail.com')">delete username</a> : stops listening for the user with the given username</li>
+      <li><a href="#" onclick="$('#command').val('option set simperiumSync true')">option set|delete|list|reset [key] [value]</a> : performs the appropriate action with the given key/value pair
     </ul>
   </body>
 </html>

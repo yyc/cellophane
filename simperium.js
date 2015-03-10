@@ -4,8 +4,10 @@ var merge=require("./merge_recursively")
 
 module.exports = {
   authorize: authorize
-  ,init: init
-  ,request : request
+  , init: init
+  , request : request
+  , removeToken:removeToken
+  , removeUser: removeUser
   , bucket: Bucket
   , getUserById: getUserById
   , getUserByToken: getUserByToken
@@ -48,8 +50,19 @@ function authorize(apiKey,appName,username,password,callback){
     });
   }
 }
-function Api(){
-  
+function removeUser(userid){
+  if(authenticatedUsers[userid]){
+    user = authenticatedUsers[userid];
+    delete token2users[user.accessToken];
+    if(user2id[user.username]){
+      delete user2id[user.username];
+    }
+  }
+}
+function removeToken(accessToken){
+  if(token2users[accessToken]){
+    delete token2users[accessToken];
+  }
 }
 function init(appName,userId,accessToken){
   var user=new User();
@@ -140,25 +153,50 @@ Bucket.prototype.index=function(callback,options){
   }else{
     options.data=options.data || true;
   }
-  this.requestAllJson({
-    path:this.bucketPath+"index"
-    , payload: options
-    , method: "GET"
-    }, function(err,res){
-      if(!err){
-        console.log(res);
-        callback(false,res.index,res.current)
-      }
-  });
+  if(options.limit){
+    var format="json";
+    if(options["format"]){
+      format=options["format"];
+      delete options["format"];
+    }
+    this.request({
+      path:this.bucketPath+"index"
+      , payload: options
+      , method: "GET"
+      }, function(err,res){
+        if(!err){
+          callback(false,res)
+        }
+        else{
+          log(err,res);
+          callback(true,res);
+        }
+    },format);
+  } else{
+    this.requestAllJson({
+      path:this.bucketPath+"index"
+      , payload: options
+      , method: "GET"
+      }, function(err,res){
+        if(!err){
+          callback(false,res.index,{current:res.current})
+        }
+        else{
+          log(err,res);
+          callback(true,res);
+        }
+    });
+  }
 }
-Bucket.prototype.request=function(options,callback){
+Bucket.prototype.request=function(options,callback,format){
+  format=format || "json";
   defaults={
     hostname: "api.simperium.com"
     , method: "GET"
     , headers: {"x-simperium-token":this.accessToken}
   };
   merge(defaults,options);
-  request(defaults,callback)
+  request(defaults,callback,format)
 }
 Bucket.prototype.requestAllJson=function(options,callback,response){
   if(!response){
@@ -182,7 +220,9 @@ Bucket.prototype.requestAllJson=function(options,callback,response){
     }
   },"json");
 }
-
+function readItem(bucket,obj,version){
+  
+}
 
 
 function request(options,callback,format){
@@ -215,12 +255,18 @@ function request(options,callback,format){
         if(format=="json"){
           callback(false,JSON.parse(response));
         }
+        else{
+          callback(false,response);
+        }
       }
       else if(res.statusCode==412){
         if(format=="json"){
           json=JSON.parse(response);
           json.statusCode=412;
           callback(false,json);
+        }
+        else{
+          callback(false,response);
         }
       }
       else{
