@@ -1,1 +1,1 @@
-web: node transparent-wrapper.js
+web: node alternate-endpoint.js
