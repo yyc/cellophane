@@ -147,6 +147,7 @@ Bucket.prototype.init=function(user,bucketName){
   this.bucketPath="/1/"+this.appName+"/"+this.bucketName+"/";
 }
 Bucket.prototype.index=function(callback,options){
+  console.log("index function called");
   if(!options){
     options={};
     options.data=true;

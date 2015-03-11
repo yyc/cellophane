@@ -5,11 +5,12 @@ var http=require("http");
 var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
-var test=require("./test");
-var store=require("object-store");
+var DeferredStore=require("object-store").DeferredStore;
 
 var simperium=require("./simperium");
 var merge=require("./merge_recursively")
+
+
 
 /*
 var simperiumAppName = process.env.SIMPERIUM_APP_ID || "miles-secretaries-5c5";
@@ -22,13 +23,17 @@ var port = process.env.PORT || 5000;
 var captureTokens={};
 var activeUsers={};
 var defaultOptions={stickyAttendance:false
-  ,simperiumSync:true
+  , simperiumSync:true
+  , storageMethod:"redis"
 };
 if(process.env.OPTIONS){
   merge(defaultOptions,JSON.parse(process.env.OPTIONS));
 }
 var options={};
 merge(options,defaultOptions);
+
+var store=new DeferredStore(options.storageMethod);
+
 
 var authorizeUser = function(options,callback){
   apiKey = options.apiKey || simperiumApiKey;
@@ -155,7 +160,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
     passthrough(options,req,res);
   }
 }).delete(function(req,res,next){
-  log("DELETE")
+  log("DELETE");
   next();
 });
 
@@ -165,6 +170,7 @@ app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next)
 
   }else{
     log("getting index");
+    options.format="text";
     req.bucket.index(function(err,response,extra){
       if(err){
         log(err,response);
@@ -172,7 +178,6 @@ app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next)
         res.end(response);
       }else{
         res.statusCode=200;
-        log(response,typeof response);
         res.end(response);
       }
     },options);
@@ -229,10 +234,14 @@ io.on('connection',function(socket){
           socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
           captureTokens[user.accessToken]=user.userId;
           activeUsers[username]=user.userId;
+          userStores[userId]={};
+          for(var key in user.buckets){
+            userStores[userId][key]=new DeferredStore(options[storageMethod]);
           }
-          else{
-            socket.emit("reply","error authorizing user");
-          }
+        }
+        else{
+          socket.emit("reply","error authorizing user");
+        }
       });
     }
   });
@@ -266,7 +275,6 @@ io.on('connection',function(socket){
         socket.emit("reply","error authorizing user");
       }
     });
-    test(socket,payload);
   });
   socket.on("option",function(payload){
     switch (payload[0]){
@@ -336,6 +344,73 @@ io.on('connection',function(socket){
       emit("error","delete requires at least parameter")
     }
   });
+  socket.on("upsync",function(payload){
+    if(payload[0]){
+      if([payload[1]]=="--overwrite"){
+        //overwrite
+      } else{
+        //don't overwrite
+      }
+    }else{
+      socket.emit("error","upsync requires options");
+    }
+  });//incomplete
+  socket.on("downsync",function(payload){
+    if(payload[0]){
+      if(activeUsers[payload[0]]){
+        userId=activeUsers[payload[0]];
+       var user=simperium.getUserById(userId);
+        if(user){
+          buckets=user.buckets;
+          var bucketPromises=[delayedPromise(1000)];
+          for(var key in buckets){
+            var bucketName=key;
+            var indexPromises=[delayedPromise(1000)];
+            if([payload[1]]=="--overwrite"){
+              buckets[bucketName].index(function(err,res){
+                if(!err){
+                  log("retrieved index",res);
+                  store.keys(userId+"-"+key+"-*").then(function(data){
+                    for(var i=0;i<data.length;i++){
+                      promise=store.del(data[i]);
+                      indexPromises.push(promise);
+                      bucketPromises.push(promise);
+                    }
+                    return indexPromises;
+                  }).then(function(promiseArray){
+                    Promise.all(promiseArray).then(function(data){
+                      promiseArray=[];
+                      log("Deleted all values in bucket",data);
+                      res.forEach(function(data){
+                        socket.emit("reply","Pushing "+data.d+" into "+userId+"-"+bucketName+"-"+data.id);
+                        promiseArray.push(store.set(userId+"-"+bucketName+"-"+data.id,data.d));
+                      });
+                      bucketPromises.push(Promise.all(promiseArray));
+                    });
+                  });}
+              },{data:true});
+            } else{
+              
+            }
+          }
+          Promise.all(bucketPromises).then(function(){
+            log("Downsync complete");
+            store.keys(userId+"-*").then(function(ary){
+              socket.emit("reply","listing follows");
+              socket.emit("listing",ary);
+            });
+          })
+        }
+        else{
+          socket.emit("error","user not recognized (add user first?)");
+        }
+      } else{
+        socket.emit("error","user not recognized (add user first?)");
+      }
+    }else{
+      socket.emit("error","downsync requires options");
+    }
+  });//incomplete
   console.log("io connection detected");
 })
 
@@ -373,7 +448,7 @@ function log(message,objects){
   if(objects){
     if(typeof objects=="object"){
       for(var key in objects){
-        message+=" "+JSON.stringify(object[key]);
+        message+=" "+JSON.stringify(objects[key]);
       }
     }
     else{
@@ -382,5 +457,9 @@ function log(message,objects){
   }
   console.log(message);
   io.emit("message",message);
+}
+
+function delayedPromise(ms){ // quick promisified delay function
+    return new Promise(function(r){setTimeout(r,ms);});
 }
 

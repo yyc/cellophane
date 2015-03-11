@@ -1,7 +1,7 @@
 <html>
   <head>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="http://code.jquery.com/jquery-2.1.3.min.js"></script>
+    <script src="https://code.jquery.com/jquery-2.1.3.min.js"></script>
     <script>
       var socket=io();
       var text;
@@ -22,8 +22,14 @@
           $('#console li').last().append(message);
         });
         socket.on("listing",function(array){
-          for(var i in array){
-            $('#console li').last().append("<br />"+i+"=>"+JSON.stringify(array[i]));
+          if(typeOf( array)=="object")
+            for(var i in array){
+              $('#console li').last().append("<br />"+i+"=>"+JSON.stringify(array[i]));
+            }
+          }else{
+            for(i=0;i<array.length;i++){
+              $('#console li').last().append("<br />["+i+"]=>"+JSON.stringify(array[i]));
+            }
           }
         });
         socket.on("error",function(message){
@@ -33,6 +39,10 @@
           $("#command").focus();
         });
       });
+      function typeOf(input) {
+      	return ({}).toString.call(input).slice(8, -1).toLowerCase();
+      }
+
     </script>
     <style>
       li{
@@ -71,7 +81,9 @@
       <li><a href="#" onclick="$('#command').val('add yyc478@gmail.com password')">add username password [appName apiKey]</a>: Add a user to listen for</li>
       <li><a href="#" onclick="$('#command').val('token 335eaa6528a6402cb4c9a445d87b3d4b yyc478@gmail.com')">token accessToken username </a>: associate an access Token with an added username
       <li><a href="#" onclick="$('#command').val('delete yyc478@gmail.com')">delete username</a> : stops listening for the user with the given username</li>
-      <li><a href="#" onclick="$('#command').val('option set simperiumSync true')">option set|delete|list|reset [key] [value]</a> : performs the appropriate action with the given key/value pair
+      <li><a href="#" onclick="$('#command').val('option set simperiumSync true')">option set|delete|list|reset [key] [value]</a> : performs the appropriate action with the given key/value pair</li>
+      <li><a href="#" onclick="$('#command').val('upsync yyc478@gmail.com')">push username [--overwrite]</a> Pushes all data for the given user to Simperium</li> 
+      <li><a href="#" onclick="$('#command').val('downsync yyc478@gmail.com')">pull username [--overwrite]</a> Pulls all data for the given user to Simperium</li> 
     </ul>
   </body>
 </html>
