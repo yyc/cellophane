@@ -1,4 +1,4 @@
-process.env.NODE_ENV = 'test';
+//process.env.NODE_ENV = 'test';
 var mocha = require('mocha');
 var chai = require('chai');
 var should=chai.should();

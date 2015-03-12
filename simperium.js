@@ -1,5 +1,6 @@
 var https=require("https");
 var querystring=require("querystring");
+var rp=require("request-promise");
 var merge=require("./merge_recursively");
 
 module.exports = {
@@ -15,41 +16,41 @@ module.exports = {
 var authenticatedUsers={};
 var user2id={};
 var token2users={};
+var request=rp.defaults({
+  port:443
+  , json:true
+});
 
-function authorize(apiKey,appName,username,password,callback){
-  if(authenticatedUsers[user2id[username]]){
-    callback(false,authenticatedUsers[user2id[username]]);
-  } else{
-    var user=new User();
-    user.username=username;
-    user.appName=appName;
-    user.apiKey=apiKey,
-    request({
-      hostname: "auth.simperium.com",
-      path:"/1/"+appName+"/authorize/",
-      method:"POST",
-      headers: {"x-simperium-api-key":apiKey},
-      payload: JSON.stringify({"username":username,"password":password})
-    },function(err,response){
-      if(!err){
-        user.userId=response.userid;
-        user.accessToken=response.access_token;
-        user2id[username]=response.userid;
-        token2users[response.access_token]=response.userid;
-        user.bucketList(user,function(error,res){
-          if(!error){
-            authenticatedUsers[response.userid]=user;
-            callback(false,authenticatedUsers[response.userid]);
-          }else{
-            callback(true,user);
+function authorize(apiKey,appName,username,password){
+  return new Promise(function(fulfill,reject){
+    if(authenticatedUsers[user2id[username]]){
+      reject(authenticatedUsers[user2id[username]]);
+    } else{
+      var user=new User();
+      user.username=username;
+      user.appName=appName;
+      user.apiKey=apiKey,
+      request.post({
+        url: "https://auth.simperium.com/1/"+appName+"/authorize/"
+        , headers: {"x-simperium-api-key":apiKey}
+        , json: {"username":username,"password":password}
+      }).then(function(response){
+          user.userId=response.userid;
+          user.accessToken=response.access_token;
+          user2id[username]=response.userid;
+          token2users[response.access_token]=response.userid;
+          return user.bucketList(user);
           }
+        ,function(error){
+          reject(error);
+      }).then(function(resp){
+          authenticatedUsers[resp.userid]=user;
+          fulfill(authenticatedUsers[resp.userid]);
+        },function(error){
+          reject(error);
         });
-      }
-      else{
-        callback(true,response);
-      }
-    });
-  }
+    }
+  });
 }
 function removeUser(userid){
   if(authenticatedUsers[userid]){
@@ -81,25 +82,22 @@ function User(){
   var buckets;
   var bucketList;
 }
-User.prototype.bucketList=function(user,callback){
-  user.buckets={};
-  request({
-      hostname: "api.simperium.com",
-      path:"/1/"+this.appName+"/buckets",
-      method:"GET",
-      headers: {"x-simperium-token":this.accessToken}
-  },function(err,json){
-    if(!err){
-      var buckets={};
-      for(i=0;i<json.buckets.length;i++){
-        user.getBucket(json.buckets[i].name);
-      }
-      callback(false,json);
-    } else{
-      callback(true,json);
-    }
-    
-  });
+User.prototype.bucketList=function(user){
+  return new Promise(function(fulfill,reject){
+    user.buckets={};
+    request.get({
+        url: "http://api.simperium.com/1/"+this.appName+"/buckets",
+        headers: {"x-simperium-token":user.accessToken}
+    }).then(function(json){
+        var buckets={};
+        for(i=0;i<json.buckets.length;i++){
+          user.getBucket(json.buckets[i].name);
+        }
+        fulfill(json);
+      },function(error){
+        reject(error);
+      });
+    });
 }
 User.prototype.getBucket=function(bucketName){
   if(this.buckets[bucketName]){//bucket already initialized
@@ -226,7 +224,7 @@ function readItem(bucket,obj,version){
 }
 
 
-function request(options,callback,format){
+function makeRequest(options,callback,format){
   hostname=options.hostname||"api.simperium.com";
   path = options.path || "/1/miles-secretaries-5c5/authorize/";
   method = options.method || "POST";
@@ -289,6 +287,6 @@ function request(options,callback,format){
 
 function log(options){
   if (process.env.NODE_ENV !== 'test') {
-    console.log(string);
+    console.log(options);
   }
 }

@@ -276,10 +276,11 @@ io.on('connection',function(socket){
     }
   });
   socket.on("test",function(payload){
+    process.env.NODE_ENV = "dev";
     testData().then(function(user){
       socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
     },function(error){
-      socket.emit("reply","error authorizing user");
+      socket.emit("reply","error authorizing user"+error);
     });
   });
   socket.on("option",function(payload){
@@ -486,25 +487,21 @@ function authorizeUser(options,callback){
       if(user){
         callback(false,user);
       } else{
-        var requestString="";
-          simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
-            if(error){
-              callback(true,user);
-            }else{
-              callback(false,user);
-            }
+        simperium.authorize(apiKey,appName,options.username,options.password)
+        .then(function(user){
+            callback(false,user);
+          },function(error){
+            callback(true,error);
           });
       }
     }
     else{
 //For production can just make this pass through. Or maybe not? Would be useful to capture all auth data.
-      var requestString="";
-        simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
-          if(error){
-            callback(true,user);
-          }else{
-            callback(false,user);
-          }
+      simperium.authorize(apiKey,appName,options.username,options.password)
+      .then(function(user){
+          callback(false,user);
+        },function(error){
+          callback(true,error);
         });
     }
   } else{
@@ -527,7 +524,8 @@ function testData(){
         fulfill(user);
       }
       else{
-        reject(true);
+        
+        reject(user);
       }
     });
   })
