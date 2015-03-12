@@ -22,11 +22,11 @@
           $('#console li').last().append(message);
         });
         socket.on("listing",function(array){
-          if(typeOf( array)=="object")
+          if(typeOf(array)=="object"){
             for(var i in array){
               $('#console li').last().append("<br />"+i+"=>"+JSON.stringify(array[i]));
             }
-          }else{
+          } else{
             for(i=0;i<array.length;i++){
               $('#console li').last().append("<br />["+i+"]=>"+JSON.stringify(array[i]));
             }

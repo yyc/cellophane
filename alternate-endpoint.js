@@ -9,16 +9,12 @@ var DeferredStore=require("object-store").DeferredStore;
 
 var simperium=require("./simperium");
 var merge=require("./merge_recursively")
-
-
-
-/*
-var simperiumAppName = process.env.SIMPERIUM_APP_ID || "miles-secretaries-5c5";
-var simperiumApiKey = process.env.SIMPERIUM_API_KEY || "11afb5edc0b74c75b21518654f960d5f";
-*/
-var simperiumAppName = process.env.SIMPERIUM_APP_ID || "photo-wages-1b6";
-var simperiumApiKey = process.env.SIMPERIUM_API_KEY || "59d266d2e77d4c89a39fad5172a5f3f7";
-var port = process.env.PORT || 5000;
+var configs=require("./config.js");
+var simperiumAppName =configs.appName;
+var simperiumApiKey = configs.apiKey;
+var testUsername=configs.username;
+var testPassword=configs.password;
+var port = configs.port;
 
 var captureTokens={};
 var activeUsers={};
@@ -35,18 +31,13 @@ merge(options,defaultOptions);
 var store=new DeferredStore(options.storageMethod);
 
 
-var authorizeUser = function(options,callback){
-  apiKey = options.apiKey || simperiumApiKey;
-  appName = options.appName || simperiumAppName;
-  var requestString="";
-    simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
-      if(error){
-        callback(true,user);
-      }else{
-        callback(false,user);
-      }
-    });
-}
+module.exports={
+  start:start
+  , app: app
+  , test: testData
+  };
+function start(done){
+
 
 //Middleware for accessing buckets
 var objectAll=function(req,res,next){
@@ -121,16 +112,13 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   console.log("GET request detected");
   next();
 }).post(function(req,res,next){
-  console.log("POST request detected");
   //Only authorize is of any interest, we can let the rest through without parsing
   if(req.action=="authorize"){
-    log("Simperium Auth Request Received");
     responseString="";
     req.on("data",function(data){
       responseString+=data;
     }).on("end",function(){
       var json=JSON.parse(responseString);
-      console.log(json);
       authOptions={
         username: json.username
         ,password: json.password
@@ -139,15 +127,39 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
       if(req.headers['x-simperium-api-key']){
         authOptions['apiKey']=req.headers['x-simperium-api-key'];
       }
-      authorizeUser(authOptions,function(err,user){
-        if(!err){
-          res.end(JSON.stringify({
-            username:user.username,
-            access_token: user.accessToken,
-            userid: user.userId
-          }));
-        }
-      });
+      if(!activeUsers[authOptions.username]){
+        //Passthrough manually because data is already read
+        var options = {
+          hostname: "auth.simperium.com",
+          path: "/1/"+req.appName+"/authorize/",
+          port:443,
+          method: "POST",
+          headers: {"x-simperium-api-key":req.headers['x-simperium-api-key']}
+        };
+        log("Manual passthrough engaged with options",options)
+        remote=https.request(options,function(response){
+          res.statusCode=response.statusCode;
+          res.statusMessage=response.statusMessage;
+          response.pipe(res).on("end",function(){
+            res.end();
+          });
+        });
+        remote.end(JSON.stringify(authOptions));
+      }else{
+        authorizeUser(authOptions,function(err,user){
+          if(!err){
+            response=JSON.stringify({
+              username:user.username,
+              access_token: user.accessToken,
+              userid: user.userId
+            });
+            res.end(response);
+          } else{
+            res.statusCode=400;
+            res.end("Error")
+          }
+        });
+      }
     });
   }
   else{
@@ -155,7 +167,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
       hostname: "auth.simperium.com",
       path: req.url,
       method: req.method || "POST",
-      headers: {"x-simperium-token":req.headers['x-simperium-api-key']}
+      headers: {"x-simperium-api-key":req.headers['x-simperium-api-key']}
     };
     passthrough(options,req,res);
   }
@@ -185,14 +197,11 @@ app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next)
   }
 })
 
-
-
-
 var objectGet=function(req,res,next){
   
 }
 
-function objectPost(req,res,next){
+var objectPost=function(req,res,next){
   
 }
 
@@ -258,22 +267,11 @@ io.on('connection',function(socket){
     }
   });
   socket.on("test",function(payload){
-    authorizeUser({username:"yyc478@gmail.com"
-      ,password:"password"
-      ,appName:"photo-wages-1b6"
-      ,apiKey:"59d266d2e77d4c89a39fad5172a5f3f7"
-    },function(err,user){
-      if(!err){
-        socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
-        captureTokens[user.accessToken]=user.userId;
-        activeUsers["yyc478@gmail.com"]=user.userId;
-        accessToken="c8ae12b2a8ab485a9b0effd3c9100866";
-        captureTokens[accessToken]=activeUsers["yyc478@gmail.com"];
-        socket.emit("reply","Successfully associated token");
-      }
-      else{
-        socket.emit("reply","error authorizing user");
-      }
+    testData().then(function(user){
+      socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
+      socket.emit("reply","Successfully associated token");
+    },function(error){
+      socket.emit("reply","error authorizing user");
     });
   });
   socket.on("option",function(payload){
@@ -416,12 +414,18 @@ io.on('connection',function(socket){
 
 
 httpListener.listen(port,function(){
-  log("Listening on port ",port);
+  if(done){
+    done();
+  }
 });
 
+}
+start(function(){
+  log("Listening on port ",port);
+});
 function passthrough(opts,req,res,callback){
     //don't capture
-  log("Passing along request by "+(req.headers['x-simperium-token']||req.headers['x-simperium-api-key'])+" to "+opts.path);
+  log("Passing along request by "+(req.headers['x-simperium-token']||req.headers['x-simperium-api-key'])+" with options",opts);
   var options = {
     hostname: "api.simperium.com",
     port: 443,
@@ -447,8 +451,9 @@ function log(message,objects){
   message=JSON.stringify(message);
   if(objects){
     if(typeof objects=="object"){
+      message+="{";
       for(var key in objects){
-        message+=" "+JSON.stringify(objects[key]);
+        message+="\n"+key+"=>"+JSON.stringify(objects[key]);
       }
     }
     else{
@@ -463,3 +468,59 @@ function delayedPromise(ms){ // quick promisified delay function
     return new Promise(function(r){setTimeout(r,ms);});
 }
 
+function authorizeUser(options,callback){
+  apiKey = options.apiKey || simperiumApiKey;
+  appName = options.appName || simperiumAppName;
+  if(options.username){
+    if(activeUsers[options.username]){
+      user=simperium.getUserById(activeUsers[options.username]);
+      if(user){
+        callback(false,user);
+      } else{
+        var requestString="";
+          simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
+            if(error){
+              callback(true,user);
+            }else{
+              callback(false,user);
+            }
+          });
+        
+      }
+    }
+    else{
+//For production can just make this pass through. Or maybe not? Would be useful to capture all auth data.
+      var requestString="";
+        simperium.authorize(apiKey,appName,options.username,options.password,function(error,user){
+          if(error){
+            callback(true,user);
+          }else{
+            callback(false,user);
+          }
+        });
+    }
+  } else{
+    callback(true,"Missing username");
+  }
+}
+
+function testData(){
+  return new Promise(function(fulfill,reject){
+    authorizeUser({username:testUsername
+      ,password:testPassword
+      ,appName:simperiumAppName
+      ,apiKey:simperiumApiKey
+    },function(err,user){
+      if(!err){
+        accessToken=user.accessToken
+        captureTokens[accessToken]=user.userId;
+        activeUsers[testUsername]=user.userId;
+        captureTokens[accessToken]=activeUsers[testUsername];
+        fulfill(user);
+      }
+      else{
+        reject(true);
+      }
+    });
+  })
+}

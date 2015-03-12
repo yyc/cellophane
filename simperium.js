@@ -21,6 +21,7 @@ function authorize(apiKey,appName,username,password,callback){
     callback(false,authenticatedUsers[user2id[username]]);
   } else{
     var user=new User();
+    user.username=username;
     user.appName=appName;
     user.apiKey=apiKey,
     request({
@@ -90,7 +91,6 @@ User.prototype.bucketList=function(user,callback){
   },function(err,json){
     if(!err){
       var buckets={};
-      console.log(JSON.stringify(json));
       for(i=0;i<json.buckets.length;i++){
         user.getBucket(json.buckets[i].name);
       }
