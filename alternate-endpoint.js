@@ -75,15 +75,16 @@ app.route("/1/:appName/buckets").get(function(req,res,next){
       //capture
        var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
       if(user){
-        buckets=user.buckets;
-        response={};
-        response.buckets=buckets;
-        res.end(JSON.stringify(response));
+        array=[];
+        for(var key in user.buckets){
+          array.push({name:key});
+        }
+        res.end(JSON.stringify({buckets:array}));
       }else{
         user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
         user.bucketList(user,function(err,response){
           if(!err){
-            res.end(response);
+            res.end(JSON.stringify(response));
           }else{
             res.end(response);
             log(response);
@@ -196,7 +197,9 @@ app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next)
         res.end(response);
       }else{
         res.statusCode=200;
-        res.end(response);
+        res.end(JSON.stringify({
+          current:extra.current
+          ,index:response}));
       }
     },options);
     

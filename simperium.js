@@ -94,9 +94,9 @@ User.prototype.bucketList=function(user,callback){
       for(i=0;i<json.buckets.length;i++){
         user.getBucket(json.buckets[i].name);
       }
-      callback(false,response);
+      callback(false,json);
     } else{
-      callback(true,response);
+      callback(true,json);
     }
     
   });

@@ -84,8 +84,7 @@ describe("Ditto Checks",function(){
         , method: "GET"
       })
       .then(function(res){
-        response="";
-        remote=response;
+        remote=JSON.parse(res);
         done();
       },function(error){
         done();
@@ -99,71 +98,77 @@ describe("Ditto Checks",function(){
         , method: "GET"
       })
       .then(function(res){
-        response="";
-        local=response;
+        local=JSON.parse(res);
         done();
       });
     });
     it('Equality',function(done){
       result=compare(remote,local);
+      local.should.be.a("object");
+      remote.should.be.a("object");
       result.should.equal(0);
       done();
     });
   });
-/*
-  describe("Bucket Index tests",function(){
+  describe("Bucket Index",function(){
     it("Remote Call",function(done){
-      chai.request("https://api.simperium.com")
-      .get("/1/"+appName+"/table/index?data=true")
-      .set("X-Simperium-Token",accessToken)
-     .then(function(res){
-        res.should.have.status(200);
-        remote=res.body;
+      request
+      .get({
+        uri: "https://api.simperium.com/1/"+appName+"/table/index"
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
+        , qs:{
+          data:true
+        }
+      })
+      .then(function(res){
+        remote=JSON.parse(res);
+        done();
+      },function(error){
         done();
       });
     });
-    it('Local Index Call',function(done){
-      chai.request(localHost)
-      .get("/1/"+appName+"/table/index?data=true")
-      .set("X-Simperium-Token",accessToken)
+    it('Local Call',function(done){
+      request
+      .get({
+        uri: localHost+"/1/"+appName+"/table/index"
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
+      })
       .then(function(res){
-        res.should.have.status(200);
-        local=res.body;
+        local=JSON.parse(res);
         done();
       });
     });
     it('Equality',function(done){
       result=compare(remote,local);
       result.should.equal(0);
+      local.should.be.a("object");
+      remote.should.be.a("object");
       done();
     });
   });
-*/
 });
 
 function compare(sub,set){
   diff=0;
-  console.log("Comparing",sub,set);
   if(typeOf(sub)=="array"&&typeOf(set)=="array"){
     for(i=0;i<sub.length;i++){
-      if(set[i]!=sub[i]){
-        console.log("different",set[i],sub[i]);
-        diff++;
-      }
+      diff+=compare(sub[i],set[i]);
     }
   } else if(typeOf(sub)=="object"&&typeOf(set)=="object"){
     for(var key in sub){
       if(sub[key]!=set[key]){
         if(typeof sub[key] == "object" && typeof set[key] == "object"){
-          diff+=compareObj(sub[key],set[key]);
+          diff+=compare(sub[key],set[key]);
         }else{
           diff++;
-          console.log("different",set[key],sub[key]);
+          console.log("different1",set[key],sub[key]);
         }
       }
     }
   } else if(sub!=set){
-    console.log("different",set,sub);
+    console.log("different2",set,sub);
     diff++;
   }
   return diff;
