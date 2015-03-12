@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 var express=require("express");
 var app=express();
 var router=express.Router();
@@ -67,36 +68,29 @@ var objectAll=function(req,res,next){
     }
   }
 }
-
-//Getting auth Requests
-app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
-  req.appName=req.params.appName;
-  req.action=req.params.method;
+app.route("/1/:appName/buckets").get(function(req,res,next){
   if(req.headers['x-simperium-token']){
     //This route should only match the api.simperium.com/1/appName/buckets method
     if(captureTokens[req.headers['x-simperium-token']]){
       //capture
-      if(req.action="buckets"){
-         var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-        if(user){
-          buckets=user.buckets;
-          response={};
-          response.buckets=buckets;
-          res.end(JSON.stringify(response));
-        }else{
-          user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-          user.bucketList(user,function(err,response){
-            if(!err){
-              res.end(response);
-            }else{
-              res.end(response);
-              log(response);
-            }
-          });
-        }
+       var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
+      if(user){
+        buckets=user.buckets;
+        response={};
+        response.buckets=buckets;
+        res.end(JSON.stringify(response));
+      }else{
+        user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+        user.bucketList(user,function(err,response){
+          if(!err){
+            res.end(response);
+          }else{
+            res.end(response);
+            log(response);
+          }
+        });
       }
-    }
-    else{
+    } else{
       var options = {
         hostname: "api.simperium.com",
         path: req.url,
@@ -104,12 +98,25 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
         headers: {"x-simperium-token":req.headers['x-simperium-token']}
       };
       passthrough(options,req,res);
-    }
+    } 
+  } else{
+    res.statusCode=401;
+    res.statusMessage = "Unauthorized";
+    res.end("401 Unauthorized: Missing Token");
+}
+});
+//Getting Requests to auth.simperium.com
+app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
+  req.appName=req.params.appName;
+  req.action=req.params.method;
+  if(req.headers['x-simperium-token']){
+    res.redirect(301,"buckets");
+    res.end();
   }else{
     next();
   }
 }).get(function(req,res,next){
-  console.log("GET request detected");
+  log("GET request detected");
   next();
 }).post(function(req,res,next){
   //Only authorize is of any interest, we can let the rest through without parsing
@@ -136,7 +143,6 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
           method: "POST",
           headers: {"x-simperium-api-key":req.headers['x-simperium-api-key']}
         };
-        log("Manual passthrough engaged with options",options)
         remote=https.request(options,function(response){
           res.statusCode=response.statusCode;
           res.statusMessage=response.statusMessage;
@@ -269,7 +275,6 @@ io.on('connection',function(socket){
   socket.on("test",function(payload){
     testData().then(function(user){
       socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
-      socket.emit("reply","Successfully associated token");
     },function(error){
       socket.emit("reply","error authorizing user");
     });
@@ -409,7 +414,7 @@ io.on('connection',function(socket){
       socket.emit("error","downsync requires options");
     }
   });//incomplete
-  console.log("io connection detected");
+  log("io connection detected");
 })
 
 
@@ -432,7 +437,6 @@ function passthrough(opts,req,res,callback){
     method: "GET"
   };
   merge(options,opts);
-  console.log(req.method);
   remote=https.request(options,function(response){
     res.statusCode=response.statusCode;
     res.statusMessage=response.statusMessage;
@@ -460,7 +464,9 @@ function log(message,objects){
       message+=" "+JSON.stringify(objects);
     }
   }
-  console.log(message);
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(message);
+  }
   io.emit("message",message);
 }
 
@@ -485,7 +491,6 @@ function authorizeUser(options,callback){
               callback(false,user);
             }
           });
-        
       }
     }
     else{

@@ -1,6 +1,6 @@
 var https=require("https");
 var querystring=require("querystring");
-var merge=require("./merge_recursively")
+var merge=require("./merge_recursively");
 
 module.exports = {
   authorize: authorize
@@ -147,7 +147,7 @@ Bucket.prototype.init=function(user,bucketName){
   this.bucketPath="/1/"+this.appName+"/"+this.bucketName+"/";
 }
 Bucket.prototype.index=function(callback,options){
-  console.log("index function called");
+  log("index function called");
   if(!options){
     options={};
     options.data=true;
@@ -217,7 +217,7 @@ Bucket.prototype.requestAllJson=function(options,callback,response){
       }
     }else{
       callback(true,response);
-      console.log(res);
+      log(res);
     }
   },"json");
 }
@@ -243,15 +243,15 @@ function request(options,callback,format){
   if(method=="GET"){
   options.path+="?"+querystring.stringify(payload);
   }
-  console.log("Making",method,"request to ",hostname+options.path)
-  console.log("With headers",JSON.stringify(headers));
-  console.log("And payload",payload);
+  log("Making",method,"request to ",hostname+options.path)
+  log("With headers",JSON.stringify(headers));
+  log("And payload",payload);
   secureRequest=https.request(options,function(res){
     response="";
     res.on("data",function(data){
       response+=data.toString();
     }).on("end",function(){
-      console.log("Request ended with code "+res.statusCode);
+      log("Request ended with code "+res.statusCode);
       if(res.statusCode==200){
         if(format=="json"){
           callback(false,JSON.parse(response));
@@ -284,71 +284,11 @@ function request(options,callback,format){
     secureRequest.end();
   }
 }
-/*
-Authorize User
-      >>> curl -H 'X-Simperium-API-Key: { api_key }' \
-        -d '{"username":"test@test.com", "password":"test"}' \
-        https://auth.simperium.com/1/{ app_id }/authorize/
-    >>> {"username": "test@test.com", "access_token": "84f27d20f93b414f8b7bc3441f87c9e1", "userid": "f5067cc81c9c26dcdca468f0cdf60508"} 
 
 
-Update username/password
-      >>> curl -H 'X-Simperium-API-Key: { api_key }' \
-        -d '{"username":"test@test.com", "password":"test", "new_username":"test2@test.com"}' \
-        https://auth.simperium.com/1/{ app_id }/update/
-    >>> {"status": "success"} 
 
-Reset username/password
-    >>> curl -H 'X-Simperium-API-Key: { api_key with admin privileges }' \
-        -d '{"username":"test@test.com", "new_password":"newpass"}' \
-        https://auth.simperium.com/1/{ app_id }/reset_password/
-    >>> {"status": "success"} 
-    username — Usernames currently must be a valid email address
-
-Delete user
-    >>> curl -H 'X-Simperium-API-Key: { api_key with admin privileges }' \
-        -d '{"username":"test@test.com"}' \
-        https://auth.simperium.com/1/{ app_id }/delete/
-    
-    >>> {"status": "success"} 
-
-Index of Objects for bucket
-    >>> curl -H 'X-Simperium-Token: { access_token }' \
-        https://api.simperium.com/1/{ app_id }/{ bucket_name }/index
-        
-
-var https=require("https");
-var querystring=require("querystring");
-var simperium=require('./simperium');
-var user;
-var bucket;
-simperium.init("11afb5edc0b74c75b21518654f960d5f","miles-secretaries-5c5","yyc478@gmail.com","password",function(err,res){
-  if(err){
-    console.log(err,res);
-  }else{
-    user=res;
-    bucket=user.getBucket("tables");
-    bucket.index(function(err,res){
-      console.log(err,res);
-    });
+function log(options){
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(string);
   }
-});
-
-  
-  
-simperium.request({
-      hostname: "api.simperium.com",
-      path:"/1/miles-secretaries-5c5/buckets",
-      method:"GET",
-      headers: {"x-simperium-token":"8fed3276d8314e339403dd019f885d8f"}
-  },function(err,response){
-    if(!err){
-      json=JSON.parse(response);
-      console.log(response);
-    } else{
-      console.log(true,response);
-    }
-    
-  });
-
-*/
+}

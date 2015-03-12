@@ -1,6 +1,8 @@
+process.env.NODE_ENV = 'test';
 var mocha = require('mocha');
 var chai = require('chai');
 var should=chai.should();
+var expect=chai.expect;
 var server=require("../alternate-endpoint");
 var http=require("http");
 var rp=require("request-promise");
@@ -14,30 +16,31 @@ var testPassword=configs.password;
 var localHost="http://localhost:5000";
 
 before(function(done){    
-  rp.get(localHost)
+  rp.get(localHost+"/admin")
     .then(function(success){
+      console.log("Existing server detected")
       done();
     },function(error){
+      console.log("Can't find server. Starting..")
       server.start(done);
     });
 });
 
-var request;
-var remote;
-var local;
+var request=rp;
+var remote="";
+var local="";
+
 describe("Ditto Checks",function(){
   describe("Auth tests",function(){
-    request=rp.defaults({
-      uri: localHost+"/1/"+appName+"/authorize/"
-      , headers:{"X-Simperium-API-Key":apiKey}
-      , json:{username:testUsername,password:testPassword}
-    });
     it("Remote Call",function(done){
       request
-      .post()
+      .post({
+        uri: localHost+"/1/"+appName+"/authorize/"
+        , headers:{"X-Simperium-API-Key":apiKey}
+        , json:{username:testUsername,password:testPassword}
+      })
       .then(function(res){
-        response="";
-        remote=response;
+        remote=res;
         done();
       },function(error){
         done();
@@ -51,29 +54,35 @@ describe("Ditto Checks",function(){
     });
     it('Local Call',function(done){
       request
-      .post()
+      .post({
+        uri: localHost+"/1/"+appName+"/authorize/"
+        , headers:{"X-Simperium-API-Key":apiKey}
+        , json:{username:testUsername,password:testPassword}
+      })
       .then(function(res){
-        response="";
-        local=response;
+        local=res;
         done();
       });
     });
     it('Equality',function(done){
+/*
       result=compare(remote,local);
       result.should.equal(0);
+*/
+      local.should.be.a("object");
+      remote.should.be.a("object");
       accessToken=local.access_token;
       done();
     });
   });
-/*
   describe("List Buckets",function(){
-    request=rp.defaults({
-      uri: localHost+"/1/"+appName+"/buckets"
-      , headers:{"X-Simperium-Token":accessToken}
-    });
     it("Remote Call",function(done){
       request
-      .get()
+      .get({
+        uri: "https://api.simperium.com/1/"+appName+"/buckets"
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
+      })
       .then(function(res){
         response="";
         remote=response;
@@ -84,7 +93,11 @@ describe("Ditto Checks",function(){
     });
     it('Local Call',function(done){
       request
-      .get()
+      .get({
+        uri: localHost+"/1/"+appName+"/buckets"
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
+      })
       .then(function(res){
         response="";
         local=response;
@@ -97,7 +110,6 @@ describe("Ditto Checks",function(){
       done();
     });
   });
-*/
 /*
   describe("Bucket Index tests",function(){
     it("Remote Call",function(done){
@@ -130,8 +142,8 @@ describe("Ditto Checks",function(){
 });
 
 function compare(sub,set){
-  console.log("comparing",sub,set);
   diff=0;
+  console.log("Comparing",sub,set);
   if(typeOf(sub)=="array"&&typeOf(set)=="array"){
     for(i=0;i<sub.length;i++){
       if(set[i]!=sub[i]){
