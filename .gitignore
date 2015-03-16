@@ -28,8 +28,12 @@ node_modules
 
 config.js
 api.txt
+
 #personal test stuff
 test.js
+
+#redis dump
+dump.rdb
 
 
 .DS_STORE
