@@ -10,6 +10,7 @@ var configs=require("../config.js");
 var simperium=require("../simperium.js");
 var appName=configs.appName;
 var apiKey=configs.apiKey;
+var testBucket=configs.testBucket || "guest";
 var accessToken="";
 var testUsername=configs.username;
 var testPassword=configs.password;
@@ -121,7 +122,7 @@ describe("Ditto Checks",function(){
     it("Remote Call",function(done){
       request
       .get({
-        uri: "https://api.simperium.com/1/"+appName+"/table/index"
+        uri: "https://api.simperium.com/1/"+appName+"/"+testBucket+"/index"
         , headers:{"X-Simperium-Token":accessToken}
         , method: "GET"
         , qs:{
@@ -140,7 +141,7 @@ describe("Ditto Checks",function(){
     it('Local Call',function(done){
       request
       .get({
-        uri: localHost+"/1/"+appName+"/table/index"
+        uri: localHost+"/1/"+appName+"/"+testBucket+"/index"
         , headers:{"X-Simperium-Token":accessToken}
         , method: "GET"
         , qs:{
@@ -158,7 +159,7 @@ describe("Ditto Checks",function(){
       });
     });
     it('Equality',function(done){
-      result=compare(remote,local);
+      result=compare(local,remote);
       result.should.equal(0);
       local.should.not.equal({});
       remote.should.not.equal({});
@@ -173,7 +174,7 @@ describe("simperium.js Checks",function(){
     bucket.init({
       accessToken:accessToken
       , appName: appName
-    },(configs.bigBucket||"guest"));
+    },testBucket);
     bucket.index({data:true}).then(function(res){
       expect(res.index.length).to.be.above(99);
       done();
@@ -208,7 +209,7 @@ describe("Caching Checks",function(){
   it('Bucket Index',function(done){
     request
     .get({
-      uri: localHost+"/1/"+appName+"/table/index"
+      uri: localHost+"/1/"+appName+"/"+testBucket+"/index"
       , headers:{"X-Simperium-Token":accessToken}
       , method: "GET"
       , qs:{
@@ -218,6 +219,7 @@ describe("Caching Checks",function(){
     .then(function(res){
       local=JSON.parse(res);
       local.should.be.a("object");
+//      console.log(local);
       done();
     },function(error){
       throw error;
@@ -246,12 +248,12 @@ function compare(sub,set){
           diff+=compare(sub[key],set[key]);
         }else{
           diff++;
-          console.log("different1",sub[key],set[key]);
+          console.log("different1",sub[key],"&&&&&&&&",set[key]);
         }
       }
     }
   } else if(sub!=set){
-    console.log("different2",sub,set);
+    console.log("different2",sub,"&&&&&&&&",set);
     diff++;
   }
   return diff;

@@ -45,8 +45,8 @@ function authorize(apiKey,appName,username,password){
         ,function(error){
           reject(error);
       }).then(function(resp){
-          authenticatedUsers[resp.userid]=user;
-          fulfill(authenticatedUsers[resp.userid]);
+          authenticatedUsers[user.userId]=user;
+          fulfill(authenticatedUsers[user.userId]);
         },function(error){
           reject(error);
         });
@@ -90,7 +90,7 @@ User.prototype.bucketList=function(user){
         url: "http://api.simperium.com/1/"+this.appName+"/buckets",
         headers: {"x-simperium-token":user.accessToken}
     }).then(function(json){
-        var buckets={};
+        this.buckets={};
         for(i=0;i<json.buckets.length;i++){
           user.getBucket(json.buckets[i].name);
         }
@@ -127,12 +127,16 @@ function getUserByToken(accessToken,userId){
 function getUserById(userId,appName,accessToken){
     return authenticatedUsers[userId];
 }
+function getUserByName(userName){
+    return authenticatedUsers[user2Id[userId]];
+}
 function Bucket(){
   var bucketName;
   var apiKey;
   var appName;
   var accessToken;
   var bucketPath;
+  var itemCount;
 }
 Bucket.prototype.init=function(user,bucketName){
   if(typeof user == "object"){
@@ -153,26 +157,31 @@ Bucket.prototype.index=function(options){
   }else{
     options.data=options.data || true;
   }
-  if(options.limit){
-    var format="json";
-    if(options["format"]){
-      format=options["format"];
-      delete options["format"];
+  return request.get({
+    url:"https://api.simperium.com"+bucket.bucketPath+"index"
+    , qs: options
+    , method: "GET"
+    , headers: {"x-simperium-token":bucket.accessToken}
+  });
+}
+Bucket.prototype.getAll=function(){
+  bucket=this;
+  promise=bucket.requestAllJson({
+    url:"https://api.simperium.com"+bucket.bucketPath+"index"
+    , qs: {
+      data:true
     }
-    return request.get({
-      url:"https://api.simperium.com"+bucket.bucketPath+"index"
-      , qs: options
-      , method: "GET"
-      , headers: {"x-simperium-token":bucket.accessToken}
+    , method: "GET"
+    , headers: {"x-simperium-token":bucket.accessToken}
+  });
+  promise.then(function(res){
+    return new Promise(function(fulfill,reject){
+      bucket.itemCount=res.index.length;
+      fulfill(res);
     });
-  } else{
-    return bucket.requestAllJson({
-      url:"https://api.simperium.com"+bucket.bucketPath+"index"
-      , qs: options
-      , method: "GET"
-      , headers: {"x-simperium-token":bucket.accessToken}
-    });
-  }
+  });
+  return promise;
+  
 }
 /*
 Bucket.prototype.request=function(options,callback,format){
@@ -194,7 +203,6 @@ Bucket.prototype.requestAllJson=function(options){
       return new Promise(function(fulfill,reject){
         merge(response,res);
         if(res.mark){
-          log("Pushing new mark",res.mark);
           options.qs.mark=res.mark;
           promiseArray.push(request(options).then(handleResponse,function(error){
             reject(error);
@@ -205,7 +213,6 @@ Bucket.prototype.requestAllJson=function(options){
           });
         }
         else{
-          log("No more marks");
           fulfill();
         }
       });

@@ -105,6 +105,7 @@ app.route("/1/:appName/buckets").get(function(req,res,next){
     res.end("401 Unauthorized: Missing Token");
 }
 });
+
 //Getting Requests to auth.simperium.com
 app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   req.appName=req.params.appName;
@@ -181,20 +182,33 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
 });
 
 app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next){
-  if(false){
-    //Handle caching
-
+  if(typeof req.bucket.itemCount=="number"){
+    log("Cached already exists?");
+    store.keys(itemKey(req.user.userId,req.bucket.bucketName))
+    .then(function(response){
+      res.end(JSON.stringify(response));
+    },function(error){
+      res.statusCode=500;
+      res.end(error);
+    });
   }else{
-    log("getting index");
-    options=req.params;
-    options.format="text";
-    options.limit=options.limit || 99;
+    options=req.query;
     req.bucket.index(options)
-    .then(function(err,response,extra){
+    .then(function(response){
       res.statusCode=200;
-      res.end(JSON.stringify({
-        current:extra.current
-        ,index:response}));
+      res.end(JSON.stringify(response));
+      console.log("After",req.bucket.itemCount);
+    //Store everything in the cache
+      if(options.data){
+        for(i=0;i<response.index.length;i++){
+          if(response.index[i].d){
+            store.set(itemKey(req.user,req.bucket,response.index[i].id),response.index[i].d)
+            .then(function(success){
+            },function(error){
+            });
+          }
+        }
+      }
     },function(err){
       log(err);
       res.statusCode=500;
@@ -256,11 +270,35 @@ io.on('connection',function(socket){
         activeUsers[username]=user.userId;
         userStores[userId]={};
         for(var key in user.buckets){
-          userStores[userId][key]=new DeferredStore(options[storageMethod]);
+          ary.push(cacheBucket(user,key));
         }
+        Promise.all(ary).then(function(response){
+          socket.emit("reply","Buckets cached");
+        },function(error){
+          socket.emit("error","Buckets couldn't be cached");
+          log(error);
+        });
       },function(error){
           socket.emit("reply","error authorizing user");
       });
+    }
+  });
+  socket.on("store",function(payload){
+    switch(payload[0]){
+      case "flush":
+        store.flush().then(function(success){
+          socket.emit("reply","Store successfully flushed");
+        },function(error){
+          socketemit("error","couldn't flush store"+error);
+        });
+      break;
+      case "keys":
+        store.keys(payload[1]).then(function(response){
+          socket.emit("listing",response);
+        },function(error){
+          socketemit("error","couldn't get listing store"+error);
+        });      
+      break;
     }
   });
   socket.on("token",function (payload){
@@ -366,39 +404,12 @@ io.on('connection',function(socket){
     if(payload[0]){
       if(activeUsers[payload[0]]){
         userId=activeUsers[payload[0]];
-       var user=simperium.getUserById(userId);
+        var user=simperium.getUserById(userId);
         if(user){
+          bucketPromises=[];
           buckets=user.buckets;
-          var bucketPromises=[delayedPromise(1000)];
           for(var key in buckets){
-            var bucketName=key;
-            var indexPromises=[delayedPromise(1000)];
-            if([payload[1]]=="--overwrite"){
-              buckets[bucketName].index(function(err,res){
-                if(!err){
-                  log("retrieved index",res);
-                  store.keys(userId+"-"+key+"-*").then(function(data){
-                    for(var i=0;i<data.length;i++){
-                      promise=store.del(data[i]);
-                      indexPromises.push(promise);
-                      bucketPromises.push(promise);
-                    }
-                    return indexPromises;
-                  }).then(function(promiseArray){
-                    Promise.all(promiseArray).then(function(data){
-                      promiseArray=[];
-                      log("Deleted all values in bucket",data);
-                      res.forEach(function(data){
-                        socket.emit("reply","Pushing "+data.d+" into "+userId+"-"+bucketName+"-"+data.id);
-                        promiseArray.push(store.set(userId+"-"+bucketName+"-"+data.id,data.d));
-                      });
-                      bucketPromises.push(Promise.all(promiseArray));
-                    });
-                  });}
-              },{data:true});
-            } else{
-              
-            }
+            bucketPromises.push(cacheBucket(userId,key,(payload[1]=="--overwrite")));
           }
           Promise.all(bucketPromises).then(function(){
             log("Downsync complete");
@@ -484,14 +495,15 @@ function authorizeUser(options){
       if(activeUsers[options.username]){
         user=simperium.getUserById(activeUsers[options.username]);
         if(user){
-          callback(false,user);
+          fulfill(user);
         } else{
+          log("user is null for some reason",activeUsers);
           simperium.authorize(apiKey,appName,options.username,options.password)
           .then(function(user){
-              fulfill(user);
-            },function(error){
-              reject(error);
-            });
+            fulfill(user);
+          },function(error){
+            reject(error);
+          });
         }
       }
       else{
@@ -509,8 +521,63 @@ function authorizeUser(options){
   });
 }
 
+function itemKey(userId,bucketName,itemId){
+  itemId = itemId || "*";
+  return userId+"-"+bucketName+"-"+itemId+"";
+}
+
+
+function cacheBucket(userId,bucketName,overwrite){
+  return new Promise(function(fulfill,reject){
+    twinArray=[];
+    if(overwrite){
+      twinArray.push(purgeBucket(userId,bucketName));
+    }
+    var res;
+    twinArray.push(simperium.getUserById(userId).getBucket(bucketName).getAll().then(function(response){
+      res=response.index;
+      return Promise.resolve();
+    },function(error){
+      return Promise.reject();
+    }));
+    Promise.all(twinArray).then(function(){
+      promiseArray=[];
+      res.forEach(function(data){
+        promiseArray.push(store.set(itemKey(userId,bucketName,data.id),data.d));
+      },function(error){
+        log("error pushing",error);
+      });
+      Promise.all(promiseArray).then(function(){
+        log("Successfully cached "+res.length+" items in "+bucketName);
+        simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+        fulfill();
+      });
+    },function(error){
+      log("problem with getAll",error);
+      reject(error);
+    });
+  });
+}
+function purgeBucket(userId,bucketName){
+  return new Promise(function(fulfill,reject){
+    indexPromises=[];
+    store.keys(itemKey(userId,bucketName,"*"),true).then(function(keys){
+      for(var i=0;i<keys.length;i++){
+        indexPromises.push(store.del(keys[i]));
+        log("Deleting",keys[i]);
+      }
+      Promise.all(indexPromises).then(function(){
+        log("Deleted all values in bucket",bucketName);
+        fulfill();
+      },function(error){
+        reject(error)
+      });
+    });
+  });
+}
 function testData(){
   return new Promise(function(fulfill,reject){
+    var ary=[];
     authorizeUser({username:testUsername
       ,password:testPassword
       ,appName:simperiumAppName
@@ -520,9 +587,15 @@ function testData(){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
-      fulfill(user);
+      for(var key in user.buckets){
+        ary.push(cacheBucket(user.userId,key,true));
+      }
+      Promise.all(ary).then(function(response){
+        fulfill(user);
       },function(error){
         reject(error);
+        log(error);
+      });
     });
-  })
+  });
 }
