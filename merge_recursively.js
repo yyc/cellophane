@@ -4,7 +4,6 @@ module.exports = function(base,extend){
   }
   for(var key in extend){
     if(typeOf(extend[key])=="array"&&typeOf(base[key])=="array"){
-      console.log("merging",base[key],"with",extend[key]);
       base[key]=base[key].concat(extend[key]);
     }
     else if(typeOf(extend[key])=="object"&&typeOf(base[key])=="object"){

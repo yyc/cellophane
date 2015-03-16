@@ -1,1 +1,1 @@
-web: node alternate-endpoint.js
+web: node index.js

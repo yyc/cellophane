@@ -3,10 +3,11 @@ var mocha = require('mocha');
 var chai = require('chai');
 var should=chai.should();
 var expect=chai.expect;
-var server=require("../alternate-endpoint");
+var server;
 var http=require("http");
 var rp=require("request-promise");
 var configs=require("../config.js");
+var simperium=require("../simperium.js");
 var appName=configs.appName;
 var apiKey=configs.apiKey;
 var accessToken="";
@@ -18,10 +19,11 @@ var localHost="http://localhost:5000";
 before(function(done){    
   rp.get(localHost+"/admin")
     .then(function(success){
-      console.log("Existing server detected")
+      console.log("Existing server detected");
       done();
     },function(error){
-      console.log("Can't find server. Starting..")
+      console.log("Can't find server, starting now.");
+      server=require("../alternate-endpoint");
       server.start(done);
     });
 });
@@ -29,7 +31,8 @@ before(function(done){
 var request=rp;
 var remote="";
 var local="";
-
+var bucketList={};
+var bucketIndex={};
 describe("Ditto Checks",function(){
   describe("Auth tests",function(){
     it("Remote Call",function(done){
@@ -47,8 +50,13 @@ describe("Ditto Checks",function(){
       });
     });
     it("Internal call",function(done){
-      server.test().then(function(user){
-        user.should.be.a("object");
+      request
+      .get({
+        uri: localHost+"/admin/test"
+        , json: true
+      })
+      .then(function(user){
+        expect(user).to.be.a("object");
         done();
       });
     });
@@ -65,12 +73,10 @@ describe("Ditto Checks",function(){
       });
     });
     it('Equality',function(done){
-/*
       result=compare(remote,local);
-      result.should.equal(0);
-*/
-      local.should.be.a("object");
-      remote.should.be.a("object");
+      expect(result).to.be.at.most(1);
+      expect(local).to.be.a("object");
+      expect(remote).to.be.a("object");
       accessToken=local.access_token;
       done();
     });
@@ -85,6 +91,7 @@ describe("Ditto Checks",function(){
       })
       .then(function(res){
         remote=JSON.parse(res);
+        expect(remote).to.be.a("object");
         done();
       },function(error){
         done();
@@ -99,13 +106,13 @@ describe("Ditto Checks",function(){
       })
       .then(function(res){
         local=JSON.parse(res);
+        expect(local).to.be.a("object");
+        bucketList=local;
         done();
       });
     });
     it('Equality',function(done){
       result=compare(remote,local);
-      local.should.be.a("object");
-      remote.should.be.a("object");
       result.should.equal(0);
       done();
     });
@@ -123,8 +130,10 @@ describe("Ditto Checks",function(){
       })
       .then(function(res){
         remote=JSON.parse(res);
+        expect(remote).to.be.a("object");
         done();
       },function(error){
+        throw error;
         done();
       });
     });
@@ -134,21 +143,95 @@ describe("Ditto Checks",function(){
         uri: localHost+"/1/"+appName+"/table/index"
         , headers:{"X-Simperium-Token":accessToken}
         , method: "GET"
+        , qs:{
+          data:true
+        }
       })
       .then(function(res){
         local=JSON.parse(res);
+        expect(local).to.be.a("object");
+        bucketIndex=local;
+        done();
+      },function(error){
+        throw error;
         done();
       });
     });
     it('Equality',function(done){
       result=compare(remote,local);
       result.should.equal(0);
-      local.should.be.a("object");
-      remote.should.be.a("object");
+      local.should.not.equal({});
+      remote.should.not.equal({});
       done();
     });
   });
 });
+
+describe("simperium.js Checks",function(){
+  it("Retrieve entire bucket index",function(done){
+    bucket=new simperium.bucket();
+    bucket.init({
+      accessToken:accessToken
+      , appName: appName
+    },(configs.bigBucket||"guest"));
+    bucket.index({data:true}).then(function(res){
+      expect(res.index.length).to.be.above(99);
+      done();
+    },function(err){
+      expect(false).to.be.ok();
+      done();
+      console.log(err);
+    });
+  });
+  
+});
+
+describe("Caching Checks",function(){
+  it('List Buckets',function(done){
+    request
+    .get({
+      uri: localHost+"/1/"+appName+"/buckets"
+      , headers:{"X-Simperium-Token":accessToken}
+      , method: "GET"
+    })
+    .then(function(res){
+      local=JSON.parse(res);
+      local.should.be.a("object");
+      done();
+    });
+  });
+  it("Compare cached listing",function(done){
+    result=compare(local,bucketList);
+    expect(result).to.be.equal(0);
+    done();
+  });
+  it('Bucket Index',function(done){
+    request
+    .get({
+      uri: localHost+"/1/"+appName+"/table/index"
+      , headers:{"X-Simperium-Token":accessToken}
+      , method: "GET"
+      , qs:{
+        data:true
+      }
+    })
+    .then(function(res){
+      local=JSON.parse(res);
+      local.should.be.a("object");
+      done();
+    },function(error){
+      throw error;
+      done();
+    });
+  });
+  it("Compare cached listing",function(done){
+    result=compare(local,bucketIndex);
+    expect(result).to.be.equal(0);
+    done();
+  });
+});
+
+
 
 function compare(sub,set){
   diff=0;
@@ -163,12 +246,12 @@ function compare(sub,set){
           diff+=compare(sub[key],set[key]);
         }else{
           diff++;
-          console.log("different1",set[key],sub[key]);
+          console.log("different1",sub[key],set[key]);
         }
       }
     }
   } else if(sub!=set){
-    console.log("different2",set,sub);
+    console.log("different2",sub,set);
     diff++;
   }
   return diff;

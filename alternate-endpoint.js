@@ -16,7 +16,6 @@ var simperiumApiKey = configs.apiKey;
 var testUsername=configs.username;
 var testPassword=configs.password;
 var port = configs.port;
-
 var captureTokens={};
 var activeUsers={};
 var defaultOptions={stickyAttendance:false
@@ -153,18 +152,16 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
         });
         remote.end(JSON.stringify(authOptions));
       }else{
-        authorizeUser(authOptions,function(err,user){
-          if(!err){
-            response=JSON.stringify({
-              username:user.username,
-              access_token: user.accessToken,
-              userid: user.userId
-            });
-            res.end(response);
-          } else{
+        authorizeUser(authOptions).then(function(user){
+          response=JSON.stringify({
+            username:user.username,
+            access_token: user.accessToken,
+            userid: user.userId
+          });
+          res.end(response);
+        },function(error){
             res.statusCode=400;
-            res.end("Error")
-          }
+            res.end(error)
         });
       }
     });
@@ -189,22 +186,28 @@ app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next)
 
   }else{
     log("getting index");
+    options=req.params;
     options.format="text";
-    req.bucket.index(function(err,response,extra){
-      if(err){
-        log(err,response);
-        res.statusCode=500;
-        res.end(response);
-      }else{
-        res.statusCode=200;
-        res.end(JSON.stringify({
-          current:extra.current
-          ,index:response}));
-      }
-    },options);
-    
+    options.limit=options.limit || 99;
+    req.bucket.index(options)
+    .then(function(err,response,extra){
+      res.statusCode=200;
+      res.end(JSON.stringify({
+        current:extra.current
+        ,index:response}));
+    },function(err){
+      log(err);
+      res.statusCode=500;
+      res.end(err);
+    });
   }
-})
+});
+
+app.route("/admin/test").all(function(req,res,next){
+  testData().then(function(user){
+    res.end(JSON.stringify(user));
+  });
+});
 
 var objectGet=function(req,res,next){
   
@@ -247,19 +250,16 @@ io.on('connection',function(socket){
         ,password:password
         ,appName:appName
         ,apiKey:apiKey
-      },function(err,user){
-        if(!err){
-          socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
-          captureTokens[user.accessToken]=user.userId;
-          activeUsers[username]=user.userId;
-          userStores[userId]={};
-          for(var key in user.buckets){
-            userStores[userId][key]=new DeferredStore(options[storageMethod]);
-          }
+      }).then(function(user){
+        socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
+        captureTokens[user.accessToken]=user.userId;
+        activeUsers[username]=user.userId;
+        userStores[userId]={};
+        for(var key in user.buckets){
+          userStores[userId][key]=new DeferredStore(options[storageMethod]);
         }
-        else{
+      },function(error){
           socket.emit("reply","error authorizing user");
-        }
       });
     }
   });
@@ -429,9 +429,7 @@ httpListener.listen(port,function(){
 });
 
 }
-start(function(){
-  log("Listening on port ",port);
-});
+
 function passthrough(opts,req,res,callback){
     //don't capture
   log("Passing along request by "+(req.headers['x-simperium-token']||req.headers['x-simperium-api-key'])+" with options",opts);
@@ -478,35 +476,37 @@ function delayedPromise(ms){ // quick promisified delay function
     return new Promise(function(r){setTimeout(r,ms);});
 }
 
-function authorizeUser(options,callback){
-  apiKey = options.apiKey || simperiumApiKey;
-  appName = options.appName || simperiumAppName;
-  if(options.username){
-    if(activeUsers[options.username]){
-      user=simperium.getUserById(activeUsers[options.username]);
-      if(user){
-        callback(false,user);
-      } else{
+function authorizeUser(options){
+  return new Promise(function(fulfill,reject){
+    apiKey = options.apiKey || simperiumApiKey;
+    appName = options.appName || simperiumAppName;
+    if(options.username){
+      if(activeUsers[options.username]){
+        user=simperium.getUserById(activeUsers[options.username]);
+        if(user){
+          callback(false,user);
+        } else{
+          simperium.authorize(apiKey,appName,options.username,options.password)
+          .then(function(user){
+              fulfill(user);
+            },function(error){
+              reject(error);
+            });
+        }
+      }
+      else{
+  //For production can just make this pass through. Or maybe not? Would be useful to capture all auth data.
         simperium.authorize(apiKey,appName,options.username,options.password)
         .then(function(user){
-            callback(false,user);
+            fulfill(user);
           },function(error){
-            callback(true,error);
+            reject(error);
           });
       }
+    } else{
+      reject("Missing username");
     }
-    else{
-//For production can just make this pass through. Or maybe not? Would be useful to capture all auth data.
-      simperium.authorize(apiKey,appName,options.username,options.password)
-      .then(function(user){
-          callback(false,user);
-        },function(error){
-          callback(true,error);
-        });
-    }
-  } else{
-    callback(true,"Missing username");
-  }
+  });
 }
 
 function testData(){
@@ -515,18 +515,14 @@ function testData(){
       ,password:testPassword
       ,appName:simperiumAppName
       ,apiKey:simperiumApiKey
-    },function(err,user){
-      if(!err){
-        accessToken=user.accessToken
-        captureTokens[accessToken]=user.userId;
-        activeUsers[testUsername]=user.userId;
-        captureTokens[accessToken]=activeUsers[testUsername];
-        fulfill(user);
-      }
-      else{
-        
-        reject(user);
-      }
+    }).then(function(user){
+      accessToken=user.accessToken
+      captureTokens[accessToken]=user.userId;
+      activeUsers[testUsername]=user.userId;
+      captureTokens[accessToken]=activeUsers[testUsername];
+      fulfill(user);
+      },function(error){
+        reject(error);
     });
   })
 }

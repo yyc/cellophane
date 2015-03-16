@@ -13,6 +13,7 @@ module.exports = {
   , getUserById: getUserById
   , getUserByToken: getUserByToken
 }
+var simperium=require("./simperium");
 var authenticatedUsers={};
 var user2id={};
 var token2users={};
@@ -144,8 +145,8 @@ Bucket.prototype.init=function(user,bucketName){
   this.accessToken=user.accessToken;
   this.bucketPath="/1/"+this.appName+"/"+this.bucketName+"/";
 }
-Bucket.prototype.index=function(callback,options){
-  log("index function called");
+Bucket.prototype.index=function(options){
+  bucket=this;
   if(!options){
     options={};
     options.data=true;
@@ -158,35 +159,22 @@ Bucket.prototype.index=function(callback,options){
       format=options["format"];
       delete options["format"];
     }
-    this.request({
-      path:this.bucketPath+"index"
-      , payload: options
+    return request.get({
+      url:"https://api.simperium.com"+bucket.bucketPath+"index"
+      , qs: options
       , method: "GET"
-      }, function(err,res){
-        if(!err){
-          callback(false,res)
-        }
-        else{
-          log(err,res);
-          callback(true,res);
-        }
-    },format);
+      , headers: {"x-simperium-token":bucket.accessToken}
+    });
   } else{
-    this.requestAllJson({
-      path:this.bucketPath+"index"
-      , payload: options
+    return bucket.requestAllJson({
+      url:"https://api.simperium.com"+bucket.bucketPath+"index"
+      , qs: options
       , method: "GET"
-      }, function(err,res){
-        if(!err){
-          callback(false,res.index,{current:res.current})
-        }
-        else{
-          log(err,res);
-          callback(true,res);
-        }
+      , headers: {"x-simperium-token":bucket.accessToken}
     });
   }
 }
+/*
 Bucket.prototype.request=function(options,callback,format){
   format=format || "json";
   defaults={
@@ -197,28 +185,45 @@ Bucket.prototype.request=function(options,callback,format){
   merge(defaults,options);
   request(defaults,callback,format)
 }
-Bucket.prototype.requestAllJson=function(options,callback,response){
-  if(!response){
-    response={};
-  }
-  bucket=this;
-  this.request(options,function(err,res){
-    if(!err){
-      merge(response,res);
-      if(res.mark){
-        options.payload.mark=res.mark;
-        bucket.requestAllJson(options,callback,response);
-      }
-      else{
-        response.mark="";
-        callback(false,response);
-      }
-    }else{
-      callback(true,response);
-      log(res);
-    }
-  },"json");
+*/
+Bucket.prototype.requestAllJson=function(options){
+  return new Promise(function(fulfill,reject){
+    var response={};
+    var promiseArray=[];
+    var handleResponse=function(res){
+      return new Promise(function(fulfill,reject){
+        merge(response,res);
+        if(res.mark){
+          log("Pushing new mark",res.mark);
+          options.qs.mark=res.mark;
+          promiseArray.push(request(options).then(handleResponse,function(error){
+            reject(error);
+            log(error);
+          }));
+          promiseArray[promiseArray.length-1].then(function(){
+            fulfill();
+          });
+        }
+        else{
+          log("No more marks");
+          fulfill();
+        }
+      });
+    };
+    bucket=this;
+    promiseArray.push(request(options).then(handleResponse
+    ,function(error){
+      reject(error);
+      log(error);
+    }));
+    Promise.all(promiseArray).then(function(){
+      fulfill(response);
+    },function(error){
+      reject(error);
+    })
+  });
 }
+
 function readItem(bucket,obj,version){
   
 }
