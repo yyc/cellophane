@@ -206,7 +206,7 @@ app.route("/1/:appName/buckets").get(function(req,res,next){
     res.end("401 Unauthorized: Missing Token");
 }
 });
-app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
+app.route("/1/:appName/:bucket/index").all(bucketAll).get(function(req,res,next){
   if(typeof req.bucket.itemCount=="number"){
     log("Cached already exists?");
     var index=[];
@@ -260,8 +260,8 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   }
 });
 
-app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectGet);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectGet);
+app.route("/1/:appName/:bucket/i/:object_id").all(bucketAll).all(objectAll).get(objectGet);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(bucketAll).all(objectAll).get(objectGet);
 
 
 //Admin routes
