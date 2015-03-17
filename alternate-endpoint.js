@@ -29,7 +29,7 @@ var options={};
 merge(options,defaultOptions);
 
 var store=new DeferredStore(options.storageMethod);
-var versions=new DeferredStore("memory");
+
 
 module.exports={
   start:start
@@ -39,6 +39,72 @@ module.exports={
 function start(done){
 
 
+//Middleware for accessing buckets
+var objectAll=function(req,res,next){
+  if(!req.headers["x-simperium-token"]){
+    res.statusCode=401;
+    res.statusMessage = "Unauthorized";
+    res.end("401 Unauthorized: Missing Token");
+  }else{
+    if(captureTokens[req.headers["x-simperium-token"]]){
+      req.user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
+      if(req.user){
+        req.bucket=req.user.getBucket(req.params.bucket);
+      }
+      else{
+        req.user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+        req.bucket=req.user.getBucket(req.params.bucket);
+      }
+      next();
+    } else{
+      var options = {
+        hostname: "api.simperium.com",
+        path: req.url,
+        method: req.method || "GET",
+        headers: {"x-simperium-token":req.headers['x-simperium-token']}
+      };
+      passthrough(options,req,res);
+    }
+  }
+}
+app.route("/1/:appName/buckets").get(function(req,res,next){
+  if(req.headers['x-simperium-token']){
+    //This route should only match the api.simperium.com/1/appName/buckets method
+    if(captureTokens[req.headers['x-simperium-token']]){
+      //capture
+       var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
+      if(user){
+        array=[];
+        for(var key in user.buckets){
+          array.push({name:key});
+        }
+        res.end(JSON.stringify({buckets:array}));
+      }else{
+        user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+        user.bucketList(user,function(err,response){
+          if(!err){
+            res.end(JSON.stringify(response));
+          }else{
+            res.end(response);
+            log(response);
+          }
+        });
+      }
+    } else{
+      var options = {
+        hostname: "api.simperium.com",
+        path: req.url,
+        method: req.method || "GET",
+        headers: {"x-simperium-token":req.headers['x-simperium-token']}
+      };
+      passthrough(options,req,res);
+    } 
+  } else{
+    res.statusCode=401;
+    res.statusMessage = "Unauthorized";
+    res.end("401 Unauthorized: Missing Token");
+}
+});
 
 //Getting Requests to auth.simperium.com
 app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
@@ -114,99 +180,8 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   log("DELETE");
   next();
 });
-//Requests to api.simperium.com
 
-//Middleware
-var apiAll=function(req,res,next){
-  if(!req.headers["x-simperium-token"]){
-    res.statusCode=401;
-    res.statusMessage = "Unauthorized";
-    res.end("401 Unauthorized: Missing Token");
-  }else{
-    if(captureTokens[req.headers["x-simperium-token"]]){
-      req.user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-      if(req.user){
-        req.bucket=req.user.getBucket(req.params.bucket);
-      }
-      else{
-        req.user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-        req.bucket=req.user.getBucket(req.params.bucket);
-      }
-      next();
-    } else{
-      var options = {
-        hostname: "api.simperium.com",
-        path: req.url,
-        method: req.method || "GET",
-        headers: {"x-simperium-token":req.headers['x-simperium-token']}
-      };
-      passthrough(options,req,res);
-    }
-  }
-}
-var objectAll=function(req,res,next){
-  if(!req.params.object_id){
-    res.statusCode=404;
-    res.end("<html><title>404: Not Found</title><body>404: Not Found</body></html>");
-  } else{
-    next();
-  }
-}
-var objectGet=function(req,res,next){
-  var objectId=req.params.object_id;
-  if(req.params.version){
-    var objectVersion=req.params.version;
-  }
-  store.get(itemKey(req.user.userId,req.bucket.bucketName,objectId)).then(function(response){
-    if(response){
-      
-    }
-  });
-  
-}
-
-var objectPost=function(req,res,next){
-  
-}
-app.route("/1/:appName/buckets").get(function(req,res,next){
-  if(req.headers['x-simperium-token']){
-    //This route should only match the api.simperium.com/1/appName/buckets method
-    if(captureTokens[req.headers['x-simperium-token']]){
-      //capture
-       var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-      if(user){
-        array=[];
-        for(var key in user.buckets){
-          array.push({name:key});
-        }
-        res.end(JSON.stringify({buckets:array}));
-      }else{
-        user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-        user.bucketList(user,function(err,response){
-          if(!err){
-            res.end(JSON.stringify(response));
-          }else{
-            res.end(response);
-            log(response);
-          }
-        });
-      }
-    } else{
-      var options = {
-        hostname: "api.simperium.com",
-        path: req.url,
-        method: req.method || "GET",
-        headers: {"x-simperium-token":req.headers['x-simperium-token']}
-      };
-      passthrough(options,req,res);
-    } 
-  } else{
-    res.statusCode=401;
-    res.statusMessage = "Unauthorized";
-    res.end("401 Unauthorized: Missing Token");
-}
-});
-app.route("/1/:appName/:bucket/index").all(bucketAll).get(function(req,res,next){
+app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next){
   if(typeof req.bucket.itemCount=="number"){
     log("Cached already exists?");
     var index=[];
@@ -260,18 +235,22 @@ app.route("/1/:appName/:bucket/index").all(bucketAll).get(function(req,res,next)
   }
 });
 
-app.route("/1/:appName/:bucket/i/:object_id").all(bucketAll).all(objectAll).get(objectGet);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(bucketAll).all(objectAll).get(objectGet);
-
-
-//Admin routes
 app.route("/admin/test").all(function(req,res,next){
   testData().then(function(user){
     res.end(JSON.stringify(user));
   });
 });
 
+var objectGet=function(req,res,next){
+  
+}
 
+var objectPost=function(req,res,next){
+  
+}
+
+app.route("/1/:appName/:bucket/i/:object_id").all(objectAll);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(objectAll);
 
 app.route("/admin").all(function(req,res,next){
   next();
@@ -333,7 +312,6 @@ io.on('connection',function(socket){
       break;
       case "keys":
         store.keys(payload[1]).then(function(response){
-          socket.emit("reply","Keys follow");
           socket.emit("listing",response);
         },function(error){
           socketemit("error","couldn't get listing store"+error);
