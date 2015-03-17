@@ -14,6 +14,7 @@ var testBucket=configs.testBucket || "guest";
 var accessToken="";
 var testUsername=configs.username;
 var testPassword=configs.password;
+var testObject=configs.testObject;
 
 var localHost="http://localhost:5000";
 
@@ -147,6 +148,48 @@ describe("Ditto Checks",function(){
         , qs:{
           data:true
         }
+      })
+      .then(function(res){
+        local=JSON.parse(res);
+        expect(local).to.be.a("object");
+        bucketIndex=local;
+        done();
+      },function(error){
+        throw error;
+        done();
+      });
+    });
+    it('Equality',function(done){
+      result=compare(local,remote);
+      result.should.equal(0);
+      local.should.not.equal({});
+      remote.should.not.equal({});
+      done();
+    });
+  });
+  describe("Item Retrieval",function(){
+    it("Remote Call",function(done){
+      request
+      .get({
+        uri: "https://api.simperium.com/1/"+appName+"/"+testBucket+"/i/"+testObject
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
+      })
+      .then(function(res){
+        remote=JSON.parse(res);
+        expect(remote).to.be.a("object");
+        done();
+      },function(error){
+        throw error;
+        done();
+      });
+    });
+    it('Local Call',function(done){
+      request
+      .get({
+        uri: localHost+"/1/"+appName+"/"+testBucket+"/i/"+testObject
+        , headers:{"X-Simperium-Token":accessToken}
+        , method: "GET"
       })
       .then(function(res){
         local=JSON.parse(res);
