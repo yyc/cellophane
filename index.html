@@ -9,7 +9,8 @@
         $('#commands').submit(function(event){
           event.preventDefault();
           text=$("#command").val();
-         $('#command').val("");
+          $("#command").focus();
+          $('#command').val("");
           command=text.split(" ",1);
           args=text.split(" ").slice(1);
           socket.emit(command,args);
@@ -34,9 +35,6 @@
         });
         socket.on("error",function(message){
           $("#console").append($("<li>").text(message).addClass("error"));
-        });
-        $("#command").blur(function(){
-          $("#command").focus();
         });
       });
       function typeOf(input) {

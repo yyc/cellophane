@@ -160,7 +160,7 @@ describe("Ditto Checks",function(){
       });
     });
     it('Equality',function(done){
-      result=compare(local,remote);
+      result=compare(remote,local);
       result.should.equal(0);
       local.should.not.equal({});
       remote.should.not.equal({});
@@ -218,13 +218,13 @@ describe("simperium.js Checks",function(){
       accessToken:accessToken
       , appName: appName
     },testBucket);
-    bucket.index({data:true}).then(function(res){
+    bucket.getAll({data:true}).then(function(res){
       expect(res.index.length).to.be.above(99);
       done();
     },function(err){
       expect(false).to.be.ok();
       done();
-      console.log(err);
+      console.log(err); 
     });
   });
   
@@ -262,7 +262,6 @@ describe("Caching Checks",function(){
     .then(function(res){
       local=JSON.parse(res);
       local.should.be.a("object");
-      console.log(local);
       done();
     },function(error){
       throw error;

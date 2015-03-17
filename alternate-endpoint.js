@@ -7,7 +7,6 @@ var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
 var DeferredStore=require("object-store").DeferredStore;
-
 var simperium=require("./simperium");
 var merge=require("./merge_recursively")
 var configs=require("./config.js");
@@ -20,7 +19,6 @@ var captureTokens={};
 var activeUsers={};
 var defaultOptions={stickyAttendance:false
   , simperiumSync:true
-  , storageMethod:"redis"
 };
 if(process.env.OPTIONS){
   merge(defaultOptions,JSON.parse(process.env.OPTIONS));
@@ -28,7 +26,32 @@ if(process.env.OPTIONS){
 var options={};
 merge(options,defaultOptions);
 
-var store=new DeferredStore(options.storageMethod);
+var redis=require("then-redis");
+
+var db=redis.createClient();
+db.scanSet=function(key){
+  return new Promise(function(fulfill,reject){
+    var promiseArray=[];
+    var set=[];
+    var handler=function(response){
+      return new Promise(function(fulfill,reject){
+        set=set.concat(response[1]);
+        if(response[0]!=0){
+          promiseArray.push(db.sscan(key,response[0]).then(handler,function(error){
+            reject(error);
+          }));
+        }
+        fulfill();
+      });
+    };
+    promiseArray.push(db.sscan(key,0).then(handler,function(error){
+      return Promise.reject(error);
+    }));
+    Promise.all(promiseArray).then(function(){
+      fulfill(set);
+    });
+  });
+}
 var versions=new DeferredStore("memory");
 
 module.exports={
@@ -193,7 +216,7 @@ var objectGet=function(req,res,next){
   if(req.params.version){
     var objectVersion=req.params.version;
   }
-  store.get(itemKey(req.user.userId,req.bucket.bucketName,objectId)).then(function(response){
+  db.get(itemKey(req.user.userId,req.bucket.bucketName,objectId)).then(function(response){
     if(response){
       
     }
@@ -205,32 +228,58 @@ var objectPost=function(req,res,next){
   
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
-  if(typeof req.bucket.itemCount=="number"){
-    log("Cached already exists?");
-    var index=[];
-    store.keys(itemKey(req.user.userId,req.bucket.bucketName))
+  if(typeof simperium.getUserById(req.user.userId).getBucket(req.bucket.bucketName).itemCount=="number"){
+    log("Cached already exists.");
+    idSlice=req.user.userId.length+req.bucket.bucketName.length+2;
+    db.hgetall(versionKey(req.user.userId,req.bucket.bucketName))
     .then(function(keys){
-      var promiseArray=[];
-      keys.forEach(function(key){
-        promiseArray.push(store.get(key).then(function(object){
-          return new Promise(function(fulfill,reject){
-            index.push({
-              id: key
-              , d: object
+      return new Promise(function(fulfill,reject){
+        var index=[];
+        if(req.query.data=="true"){
+          if(Object.keys(keys).length){
+            keyArray=Object.keys(keys);
+            db.mget(keyArray).then(function(objArray){
+              for(i=0;i<keyArray.length;i++){
+                id=keyArray[i]
+                index.push({
+                  id: (keyArray[i].slice(idSlice))
+                  , d: objArray[i]
+                  , v: keys[keyArray[i]]
+                });
+              }
+              fulfill(index);
+            },function(error){
+              log("Error retrieving objects")
+              reject(error);
             });
-            fulfill();
-          });
-        }));
+          } else{
+          fulfill(index);
+          }
+        }
+        else{
+          for(var key in keys){
+            index.push({
+              id: key.slice(idSlice)
+              , v: keys[key]
+            });
+            fulfill(index);
+          }
+        }
       });
-      return Promise.all(promiseArray);
-    })
-    .then(function(response){
-      res.end(JSON.stringify({
-        index:index
-        }));
     },function(error){
+        log("hgetall failed "+error);
+    })
+    .then(function(index){
+      db.get(currentKey(req.user.userId,req.bucket.bucketName)).then(function(curr){
+        res.end(JSON.stringify({
+          index:index
+          ,current:curr
+          }));
+      })
+    },function(error){
+      log(error);
       res.statusCode=500;
-      res.end(error);
+      res.end(JSON.stringify(error));
     });
   }else{
     options=req.query;
@@ -238,17 +287,23 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     .then(function(response){
       res.statusCode=200;
       res.end(JSON.stringify(response));
-      console.log("After",req.bucket.itemCount);
+      console.log("After",simperium.getUserById(req.user.userId).getBucket(req.bucket.bucketName).itemCount);
     //Store everything in the cache
       if(options.data){
-        for(i=0;i<response.index.length;i++){
-          if(response.index[i].d){
-            store.set(itemKey(req.user,req.bucket,response.index[i].id),response.index[i].d)
-            .then(function(success){
-            },function(error){
-            });
-          }
-        }
+        versionHash={};
+        indexHash={};
+        response.index.forEach(function(data){
+          versionHash[data.id]=data.v;
+          indexHash[itemKey(req.user.userId,req.bucket.bucketName,data.id)]=data.d;
+        });
+        promiseArray=[];
+        promiseArray.push(db.hmset(versionKey(req.user.userId,req.bucket.bucketName)),versionHash);
+        promiseArray.push(db.mset(indexHash));
+        Promise.all(promiseArray).then(function(){
+          log("Successfully cached "+res.length+" items in "+bucketName);
+        },function(error){
+          log("Unsucessfully cached elements in "+bucketName+":  Error "+error);
+        });
       }
     },function(err){
       log(err);
@@ -305,7 +360,6 @@ io.on('connection',function(socket){
         socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
-        userStores[userId]={};
         for(var key in user.buckets){
           ary.push(cacheBucket(user,key));
         }
@@ -323,20 +377,26 @@ io.on('connection',function(socket){
   socket.on("store",function(payload){
     switch(payload[0]){
       case "flush":
-        store.flush().then(function(success){
-          socket.emit("reply","Store successfully flushed");
+        db.send("FLUSHDB").then(function(success){
+          socket.emit("reply","Store successfully flushed "+success);
         },function(error){
-          socketemit("error","couldn't flush store"+error);
+          socket.emit("error","couldn't flush store"+error);
         });
       break;
-      case "keys":
-        store.keys(payload[1]).then(function(response){
+      case "list":
+        db.keys(payload[1]).then(function(response){
           socket.emit("reply","Keys follow");
           socket.emit("listing",response);
         },function(error){
-          socketemit("error","couldn't get listing store"+error);
+          socket.emit("error","couldn't get listing store"+error);
         });      
       break;
+      case "get":
+        db.get(payload[1]).then(function(response){
+          socket.emit("reply",response);
+        },function(error){
+          socket.emit("error","couldn't fetch. "+error);
+        })
     }
   });
   socket.on("token",function (payload){
@@ -450,11 +510,13 @@ io.on('connection',function(socket){
             bucketPromises.push(cacheBucket(userId,key,(payload[1]=="--overwrite")));
           }
           Promise.all(bucketPromises).then(function(){
-            log("Downsync complete");
+            socket.emit("reply","Downsync complete");
+/*
             store.keys(userId+"-*").then(function(ary){
               socket.emit("reply","listing follows");
               socket.emit("listing",ary);
             });
+*/
           })
         }
         else{
@@ -560,8 +622,13 @@ function authorizeUser(options){
 }
 
 function itemKey(userId,bucketName,itemId){
-  itemId = itemId || "*";
   return userId+"-"+bucketName+"-"+itemId+"";
+}
+function versionKey(userId,bucketName){
+    return userId+"-"+bucketName+"~keys";
+}
+function currentKey(userId,bucketName){
+    return userId+"-"+bucketName+"~current";
 }
 
 
@@ -572,44 +639,59 @@ function cacheBucket(userId,bucketName,overwrite){
       twinArray.push(purgeBucket(userId,bucketName));
     }
     var res;
+    var current;
     twinArray.push(simperium.getUserById(userId).getBucket(bucketName).getAll().then(function(response){
       res=response.index;
+      current=response.current;
       return Promise.resolve();
     },function(error){
       return Promise.reject();
     }));
     Promise.all(twinArray).then(function(){
-      promiseArray=[];
+      versionHash={};
+      indexHash={};
       res.forEach(function(data){
-        promiseArray.push(store.set(itemKey(userId,bucketName,data.id),data.d));
-      },function(error){
-        log("error pushing",error);
+        versionHash[itemKey(userId,bucketName,data.id)]=data.v;
+        indexHash[itemKey(userId,bucketName,data.id)]=data.d;
       });
-      Promise.all(promiseArray).then(function(){
-        log("Successfully cached "+res.length+" items in "+bucketName);
-        simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+      if(res.length){
+        promiseArray=[];
+        promiseArray.push(db.hmset(versionKey(userId,bucketName),versionHash));
+        promiseArray.push(db.mset(indexHash));
+        promiseArray.push(db.set(currentKey(userId,bucketName),current));
+        Promise.all(promiseArray).then(function(){
+          log("Successfully cached "+res.length+" items in "+bucketName);
+          simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+          fulfill();
+        },function(error){
+          log("Problem with caching"+error);
+          reject(error);
+        });
+      } else{
+        log(bucketName+" is empty, nothing cached.");
         fulfill();
-      });
+      }
     },function(error){
-      log("problem with getAll",error);
+      log("Problem with purging or getAll",error);
       reject(error);
     });
   });
 }
 function purgeBucket(userId,bucketName){
   return new Promise(function(fulfill,reject){
-    indexPromises=[];
-    store.keys(itemKey(userId,bucketName,"*"),true).then(function(keys){
-      for(var i=0;i<keys.length;i++){
-        indexPromises.push(store.del(keys[i]));
-        log("Deleting",keys[i]);
+    db.hkeys(versionKey(userId,bucketName)).then(function(keys){
+      if(keys.length){
+        db.del(keys).then(function(){
+          log("Deleted all values in bucket",bucketName);
+          fulfill();
+        },function(error){
+          reject(error)
+        });
       }
-      Promise.all(indexPromises).then(function(){
-        log("Deleted all values in bucket",bucketName);
+      else{
+        log(bucketName+" was empty, fulfilled automatically");
         fulfill();
-      },function(error){
-        reject(error)
-      });
+      }
     });
   });
 }
@@ -625,11 +707,9 @@ function testData(){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
-/*
       for(var key in user.buckets){
-        ary.push(cacheBucket(user.userId,key,true));
+        ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
       }
-*/
       Promise.all(ary).then(function(response){
         fulfill(user);
       },function(error){
