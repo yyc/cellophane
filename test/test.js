@@ -219,7 +219,7 @@ describe("Caching Checks",function(){
     .then(function(res){
       local=JSON.parse(res);
       local.should.be.a("object");
-//      console.log(local);
+      console.log(local);
       done();
     },function(error){
       throw error;

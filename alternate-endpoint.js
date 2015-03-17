@@ -184,9 +184,27 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
 app.route("/1/:appName/:bucket/index").all(objectAll).get(function(req,res,next){
   if(typeof req.bucket.itemCount=="number"){
     log("Cached already exists?");
+    var index=[];
     store.keys(itemKey(req.user.userId,req.bucket.bucketName))
+    .then(function(keys){
+      var promiseArray=[];
+      keys.forEach(function(key){
+        promiseArray.push(store.get(key).then(function(object){
+          return new Promise(function(fulfill,reject){
+            index.push({
+              id: key
+              , d: object
+            });
+            fulfill();
+          });
+        }));
+      });
+      return Promise.all(promiseArray);
+    })
     .then(function(response){
-      res.end(JSON.stringify(response));
+      res.end(JSON.stringify({
+        index:index
+        }));
     },function(error){
       res.statusCode=500;
       res.end(error);
@@ -587,9 +605,11 @@ function testData(){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
+/*
       for(var key in user.buckets){
         ary.push(cacheBucket(user.userId,key,true));
       }
+*/
       Promise.all(ary).then(function(response){
         fulfill(user);
       },function(error){
