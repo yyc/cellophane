@@ -229,22 +229,28 @@ var objectPost=function(req,res,next){
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.bucket.bucketName).itemCount=="number"){
-    log("Cached already exists.");
-    idSlice=req.user.userId.length+req.bucket.bucketName.length+2;
-    db.hgetall(versionKey(req.user.userId,req.bucket.bucketName))
+    var idSlice=req.user.userId.length+req.bucket.bucketName.length+2;
+    var mark=req.query.mark || 0;
+    var limit=req.query.limit || 100;
+    db.hscan(versionKey(req.user.userId,req.bucket.bucketName),mark,{"count":limit})
     .then(function(keys){
+      if(keys[0]){
+        mark=keys[0];
+      }
+      else{
+        mark=undefined;
+      }
       return new Promise(function(fulfill,reject){
         var index=[];
         if(req.query.data=="true"){
-          if(Object.keys(keys).length){
-            keyArray=Object.keys(keys);
+          if(Object.keys(keys[1]).length){
+            keyArray=Object.keys(keys[1]);
             db.mget(keyArray).then(function(objArray){
-              for(i=0;i<keyArray.length;i++){
-                id=keyArray[i]
+            for(i=0;i<keyArray.length;i++){
                 index.push({
-                  id: (keyArray[i].slice(idSlice))
+                  id: keyArray[i].slice(idSlice)
                   , d: objArray[i]
-                  , v: keys[keyArray[i]]
+                  , v: keys[1][keyArray[i]]
                 });
               }
               fulfill(index);
@@ -253,23 +259,23 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
               reject(error);
             });
           } else{
-          fulfill(index);
+          fulfill(index,mark);
           }
         }
         else{
-          for(var key in keys){
+          for(i=0;i<keyArray.length;i++){
             index.push({
-              id: key.slice(idSlice)
-              , v: keys[key]
+                id: keyArray[i].slice(idSlice)
+                , v: keys[1][keyArray[i]]
             });
-            fulfill(index);
+            fulfill(index,mark);
           }
         }
       });
     },function(error){
         log("hgetall failed "+error);
     })
-    .then(function(index){
+    .then(function(index,mark){
       db.get(currentKey(req.user.userId,req.bucket.bucketName)).then(function(curr){
         res.end(JSON.stringify({
           index:index
