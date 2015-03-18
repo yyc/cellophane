@@ -28,7 +28,13 @@ merge(options,defaultOptions);
 
 var redis=require("then-redis");
 
-var db=redis.createClient();
+if (process.env.REDISTOGO_URL) {
+  var rtg   = require("url").parse(process.env.REDISTOGO_URL);
+  var db = redis.createClient(rtg.port, rtg.hostname);
+  db.auth(rtg.auth.split(":")[1]);
+} else {
+  var db=redis.createClient();
+}
 db.scanSet=function(key){
   return new Promise(function(fulfill,reject){
     var promiseArray=[];
@@ -53,6 +59,8 @@ db.scanSet=function(key){
   });
 }
 var versions=new DeferredStore("memory");
+
+var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
 
 module.exports={
   start:start
@@ -184,12 +192,8 @@ var apiAll=function(req,res,next){
   }else{
     if(captureTokens[req.headers["x-simperium-token"]]){
       req.user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-      if(req.user){
-        req.bucket=req.user.getBucket(req.params.bucket);
-      }
-      else{
+      if(!req.user){
         req.user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-        req.bucket=req.user.getBucket(req.params.bucket);
       }
       next();
     } else{
@@ -206,7 +210,7 @@ var apiAll=function(req,res,next){
 var objectAll=function(req,res,next){
   if(!req.params.object_id){
     res.statusCode=404;
-    res.end("<html><title>404: Not Found</title><body>404: Not Found</body></html>");
+    res.end(notFound);
   } else{
     next();
   }
@@ -216,9 +220,13 @@ var objectGet=function(req,res,next){
   if(req.params.version){
     var objectVersion=req.params.version;
   }
-  db.get(itemKey(req.user.userId,req.bucket.bucketName,objectId)).then(function(response){
+  db.get(itemKey(req.user.userId,req.params.bucket,objectId)).then(function(response){
     if(response){
-      
+      res.statusCode=200;
+      res.end(JSON.stringify(response));
+    }else{
+      res.statusCode=404;
+      res.end(notFound);
     }
   });
   
@@ -228,11 +236,11 @@ var objectPost=function(req,res,next){
   
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
-  if(typeof simperium.getUserById(req.user.userId).getBucket(req.bucket.bucketName).itemCount=="number"){
-    var idSlice=req.user.userId.length+req.bucket.bucketName.length+2;
+  if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
+    var idSlice=req.user.userId.length+req.params.bucket.length+2;
     var mark=req.query.mark || 0;
     var limit=req.query.limit || 100;
-    db.hscan(versionKey(req.user.userId,req.bucket.bucketName),mark,{"count":limit})
+    db.hscan(versionKey(req.user.userId,req.params.bucket),mark,{"count":limit})
     .then(function(keys){
       if(keys[0]){
         mark=keys[0];
@@ -276,7 +284,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
         log("hgetall failed "+error);
     })
     .then(function(index,mark){
-      db.get(currentKey(req.user.userId,req.bucket.bucketName)).then(function(curr){
+      db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
         res.end(JSON.stringify({
           index:index
           ,current:curr
@@ -289,21 +297,21 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     });
   }else{
     options=req.query;
-    req.bucket.index(options)
+    req.user.getBucket(req.params.bucket).index(options)
     .then(function(response){
       res.statusCode=200;
       res.end(JSON.stringify(response));
-      console.log("After",simperium.getUserById(req.user.userId).getBucket(req.bucket.bucketName).itemCount);
+      console.log("After",simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount);
     //Store everything in the cache
       if(options.data){
         versionHash={};
         indexHash={};
         response.index.forEach(function(data){
           versionHash[data.id]=data.v;
-          indexHash[itemKey(req.user.userId,req.bucket.bucketName,data.id)]=data.d;
+          indexHash[itemKey(req.user.userId,req.params.bucket,data.id)]=data.d;
         });
         promiseArray=[];
-        promiseArray.push(db.hmset(versionKey(req.user.userId,req.bucket.bucketName)),versionHash);
+        promiseArray.push(db.hmset(versionKey(req.user.userId,req.params.bucket)),versionHash);
         promiseArray.push(db.mset(indexHash));
         Promise.all(promiseArray).then(function(){
           log("Successfully cached "+res.length+" items in "+bucketName);

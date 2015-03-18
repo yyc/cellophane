@@ -16,7 +16,8 @@
   },
   "main": "transparent-wrapper.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "mocha"
   },
   "devDependencies": {
     "chai": "^2.1.1",
