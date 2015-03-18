@@ -220,7 +220,7 @@ var objectGet=function(req,res,next){
   if(req.params.version){
     var objectVersion=req.params.version;
   }
-  db.get(itemKey(req.user.userId,req.params.bucket,objectId)).then(function(response){
+  db.hgetall(itemKey(req.user.userId,req.params.bucket,objectId)).then(function(response){
     if(response){
       res.statusCode=200;
       res.end(JSON.stringify(response));
@@ -305,15 +305,14 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     //Store everything in the cache
       if(options.data){
         versionHash={};
-        indexHash={};
+        db.multi();
         response.index.forEach(function(data){
           versionHash[data.id]=data.v;
-          indexHash[itemKey(req.user.userId,req.params.bucket,data.id)]=data.d;
+          db.hmset(itemKey(req.user.userId,req.params.bucket,data.id),data.d);
         });
-        promiseArray=[];
-        promiseArray.push(db.hmset(versionKey(req.user.userId,req.params.bucket)),versionHash);
-        promiseArray.push(db.mset(indexHash));
-        Promise.all(promiseArray).then(function(){
+        db.hmset(versionKey(req.user.userId,req.params.bucket),versionHash);
+        db.hmset(indexHash);
+        db.exec().then(function(){
           log("Successfully cached "+res.length+" items in "+bucketName);
         },function(error){
           log("Unsucessfully cached elements in "+bucketName+":  Error "+error);
@@ -333,7 +332,7 @@ app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectA
 
 //Admin routes
 app.route("/admin/test").all(function(req,res,next){
-  testData().then(function(user){
+  testData(req.query.ds).then(function(user){
     res.end(JSON.stringify(user));
   });
 });
@@ -411,6 +410,15 @@ io.on('connection',function(socket){
         },function(error){
           socket.emit("error","couldn't fetch. "+error);
         })
+      break;
+      default:
+        db.send(payload[0],payload.slice(1)).then(function(response){
+          socket.emit("reply","Response as follows ");
+          socket.emit("listing",response);
+        },function(error){
+          socket.emit("error","couldn't flush store"+error);
+        })
+      break;
     }
   });
   socket.on("token",function (payload){
@@ -664,16 +672,16 @@ function cacheBucket(userId,bucketName,overwrite){
     Promise.all(twinArray).then(function(){
       versionHash={};
       indexHash={};
-      res.forEach(function(data){
-        versionHash[itemKey(userId,bucketName,data.id)]=data.v;
-        indexHash[itemKey(userId,bucketName,data.id)]=data.d;
-      });
       if(res.length){
+        db.multi();
+        res.forEach(function(data){
+          versionHash[itemKey(userId,bucketName,data.id)]=data.v;
+          db.hmset(itemKey(userId,bucketName,data.id),data.d);
+        });
         promiseArray=[];
-        promiseArray.push(db.hmset(versionKey(userId,bucketName),versionHash));
-        promiseArray.push(db.mset(indexHash));
-        promiseArray.push(db.set(currentKey(userId,bucketName),current));
-        Promise.all(promiseArray).then(function(){
+        db.hmset(versionKey(userId,bucketName),versionHash);
+        db.set(currentKey(userId,bucketName),current);
+        db.exec().then(function(){
           log("Successfully cached "+res.length+" items in "+bucketName);
           simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
           fulfill();
@@ -709,7 +717,7 @@ function purgeBucket(userId,bucketName){
     });
   });
 }
-function testData(){
+function testData(downsync){
   return new Promise(function(fulfill,reject){
     var ary=[];
     authorizeUser({username:testUsername
@@ -721,15 +729,17 @@ function testData(){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
-      for(var key in user.buckets){
-        ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
+      if(downsync!=false){
+        for(var key in user.buckets){
+          ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
+        }
+        Promise.all(ary).then(function(response){
+          fulfill(user);
+        },function(error){
+          reject(error);
+          log(error);
+        });
       }
-      Promise.all(ary).then(function(response){
-        fulfill(user);
-      },function(error){
-        reject(error);
-        log(error);
-      });
     });
   });
 }

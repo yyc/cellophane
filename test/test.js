@@ -56,6 +56,7 @@ describe("Ditto Checks",function(){
       .get({
         uri: localHost+"/admin/test"
         , json: true
+        , qs: {ds:false}//downsync?
       })
       .then(function(user){
         expect(user).to.be.a("object");
@@ -193,7 +194,6 @@ describe("Ditto Checks",function(){
       })
       .then(function(res){
         local=JSON.parse(res);
-        console.log(local);
         expect(local).to.be.a("object");
         bucketIndex=local;
         done();
@@ -248,7 +248,7 @@ describe("Caching Checks",function(){
       done();
     });
   });
-  it("Compare cached listing",function(done){
+  it("Compare cached bucket list",function(done){
     result=compare(local,bucketList);
     expect(result).to.be.equal(0);
     done();
@@ -265,14 +265,16 @@ describe("Caching Checks",function(){
     })
     .then(function(res){
       local=JSON.parse(res);
-      local.should.be.a("object");
+      expect(local).to.be.a("object");
+      expect(local.index.length).to.be.at.most(100);
+      bucketIndex=local;
       done();
     },function(error){
       throw error;
       done();
     });
   });
-  it("Compare cached listing",function(done){
+  it("Compare cached bucket index",function(done){
     result=compare(local,bucketIndex);
     expect(result).to.be.equal(0);
     done();
@@ -288,7 +290,7 @@ function compare(sub,set,ignoreList){
   if(typeOf(sub)=="array"&&typeOf(set)=="array"){
 //Array order might not be preserved, so I'm opting to just compare lengths.
     diff+=Math.abs(sub.length-set.length);
-    console.log("Array difference length",sub.length-set.length);
+    if(sub.length-set.length) console.log("Array difference length",sub.length-set.length);
   } else if(typeOf(sub)=="object"&&typeOf(set)=="object"){
     for(var key in sub){
       var ignore=false;
