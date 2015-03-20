@@ -1,12 +1,13 @@
 {
   "name": "Cellophane.js",
   "version": "0.8.0",
-  "private":true,
+  "private": true,
   "description": "A translucent caching and conflict-resolving wrapper for Simperium API calls",
   "dependencies": {
     "body-parser": "1.12.x",
     "express": "4.12.x",
     "merge": "git://github.com/Tinkertanker/js.merge",
+    "node-uuid": "^1.4.3",
     "object-store": "git://github.com/TinkerTanker/object-store",
     "socket.io": "1.3.x",
     "then-redis": "git://github.com/yyc/then-redis"
@@ -25,7 +26,7 @@
     "request-promise": "^0.4.0"
   },
   "repository": {
-    "type":"git",
-    "url":"git://bitbucket.org:tinkertanker/cellophane"
+    "type": "git",
+    "url": "git://bitbucket.org:tinkertanker/cellophane"
   }
 }

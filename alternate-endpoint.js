@@ -7,6 +7,7 @@ var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
 var DeferredStore=require("object-store").DeferredStore;
+var uuid=require("node-uuid");
 var simperium=require("./simperium");
 var merge=require("./merge_recursively")
 var configs=require("./config.js");
@@ -267,15 +268,78 @@ var objectPresent=function(req,res,next){
     }
   })
 }
+var readJsonBody=function(req,res,next){
+  req.body="";
+  req.on("data",function(data){
+    req.body+=data;
+  });
+  req.on("end",function(){
+    if(req.body!=""){
+      req.json=JSON.parse(req.body);
+      next();
+    }else{
+      res.statusCode=400;
+      res.end("Invalid data sent");
+    }
+  });
+}
 var objectPost=function(req,res,next){
   db.multi();
+  if(req.query.ccid){
+    //check if change has been submitted before. ccid=client change id
+    db.zscore(ccidsKey(req.user.userId,req.params.bucket),req.query.ccid);
+  }
+  //check for version numbers to determine whether I should overwrite
+  db.hget(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+  db.exec().then(function(response){
+    if((req.query.ccid&&response[0]!=null)||!req.query.ccid){
+      db.multi();
+      if(req.query.replace=="1"||req.query.replace==1){
+        db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+      }
+      changeLog=req.params;
+      changeLog.d=req.json;
+      changeLog.id=req.params.object_id;
+      if((req.query.ccid&&response[1]!=null)||(!req.query.ccid&&response[0]!=null)){
+        //Object exists
+        
+      }else{
+        //Object doesn't exist. CREATE!
+        if(req.query.ccid){
+          ccid=req.query.ccid;
+        }
+        else{
+          ccid=uuid.v4()
+        }
+        db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);
+        db.hset(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
+        db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,
+      }
+      //increment version
+      db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
+      if(req.query.response)
+        
+      })
+    else{
+      res.statusCode=412;
+      if(req.query.response){
+        db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
+        .then(function(response){
+          res.end(JSON.stringify(response));
+        })
+      }else{
+        res.end();        
+      }
+    }
+  })
+
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     var idSlice=req.user.userId.length+req.params.bucket.length+2;
     var mark=req.query.mark || 0;
     var limit=req.query.limit || 100;
-    db.hscan(versionKey(req.user.userId,req.params.bucket),mark,{"count":limit})
+    db.hscan(versionsKey(req.user.userId,req.params.bucket),mark,{"count":limit})
     .then(function(keys){
       if(keys[0]){
         mark=keys[0];
@@ -348,7 +412,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
             console.log("Skipping over "+itemKey(req.user.userId,req.params.bucket,data.id)+" because it's an empty object");
           }
         });
-        db.hmset(versionKey(req.user.userId,req.params.bucket),versionHash);
+        db.hmset(versionsKey(req.user.userId,req.params.bucket),versionHash);
         db.exec().then(function(){
           log("Successfully cached "+res.length+" items in "+req.params.bucket);
         },function(error){
@@ -364,7 +428,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
 });
 
 app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(objectPost);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(objectPost);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(readJsonBody,objectPost);
 
 
 //Admin routes
@@ -553,7 +617,7 @@ io.on('connection',function(socket){
   });
   socket.on("upsync",function(payload){
     if(payload[0]){
-      if([payload[1]]=="--overwrite"){
+      if([payload[1]]=="--resolve"){
         //overwrite
       } else{
         //don't overwrite
@@ -596,7 +660,6 @@ io.on('connection',function(socket){
     
   log("io connection detected");
 })
-
 
 httpListener.listen(port,function(){
   if(done){
@@ -647,11 +710,9 @@ function log(message,objects){
   }
   io.emit("message",message);
 }
-
 function delayedPromise(ms){ // quick promisified delay function
     return new Promise(function(r){setTimeout(r,ms);});
 }
-
 function authorizeUser(options){
   return new Promise(function(fulfill,reject){
     apiKey = options.apiKey || simperiumApiKey;
@@ -685,18 +746,21 @@ function authorizeUser(options){
     }
   });
 }
-
 function itemKey(userId,bucketName,itemId){
   return userId+"-"+bucketName+"-"+itemId+"";
 }
-function versionKey(userId,bucketName){
+function versionsKey(userId,bucketName){
     return userId+"-"+bucketName+"~keys";
+}
+function ccidsKey(userId,bucketName){
+    return userId+"-"+bucketName+"~ccids";
+}
+function ccidKey(userId,bucketName,ccid){
+  return userId+"-"+bucketName+"/"+ccid;
 }
 function currentKey(userId,bucketName){
     return userId+"-"+bucketName+"~current";
 }
-
-
 function cacheBucket(userId,bucketName,overwrite){
   return new Promise(function(fulfill,reject){
     twinArray=[];
@@ -726,7 +790,8 @@ function cacheBucket(userId,bucketName,overwrite){
           }
         });
         promiseArray=[];
-        db.hmset(versionKey(userId,bucketName),versionHash);
+        db.hmset(versionsKey(userId,bucketName),versionHash);
+        db.del(ccidKey(userId,bucketName));
         db.set(currentKey(userId,bucketName),current);
         db.exec().then(function(){
           log("Successfully cached "+res.length+" items in "+bucketName);
@@ -748,7 +813,7 @@ function cacheBucket(userId,bucketName,overwrite){
 }
 function purgeBucket(userId,bucketName){
   return new Promise(function(fulfill,reject){
-    db.hkeys(versionKey(userId,bucketName)).then(function(keys){
+    db.hkeys(versionsKey(userId,bucketName)).then(function(keys){
       if(keys.length){
         db.del(keys).then(function(){
           log("Deleted all values in bucket",bucketName);
