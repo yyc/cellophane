@@ -185,6 +185,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
 
 //Middleware
 var apiAll=function(req,res,next){
+  //filters for tokens of interest and ignores the rest (passes them through directly)
   if(!req.headers["x-simperium-token"]){
     res.statusCode=401;
     res.statusMessage = "Unauthorized";
@@ -216,24 +217,58 @@ var objectAll=function(req,res,next){
   }
 }
 var objectGet=function(req,res,next){
-  var objectId=req.params.object_id;
   if(req.params.version){
     var objectVersion=req.params.version;
   }
-  db.hgetall(itemKey(req.user.userId,req.params.bucket,objectId)).then(function(response){
+  db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
+  .then(function(response){
     if(response){
       res.statusCode=200;
       res.end(JSON.stringify(response));
     }else{
-      res.statusCode=404;
-      res.end(notFound);
     }
   });
-  
 }
+var objectPresent=function(req,res,next){
+  db.exists(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
+  .then(function(response){
+    if(response){
+      next();
+    }
+    else{
+      simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
+      .then(function(response){
+        console.log(response.statusCode,response.body);
+        res.statusCode=response.statusCode;
+        if(response.headers["x-simperium-version"]){
+          res.setHeader("X-Simperium-Version",response.headers["x-simperium-version"]);
+        }
+        res.end(response.body);
+        switch(res.statusCode){
+          case 200: //success
 
+          break;
+          case 400: //bad request, check input data
+
+          break;
+          case 401: //authorization error, check token
+
+          break;
+          case 404: //specified object version does not exist
+
+          break;
+          case 412: //empty change, object was not modified
+          
+        }
+      },function(error){
+        res.statusCode=500;
+        res.end(error);
+      })
+    }
+  })
+}
 var objectPost=function(req,res,next){
-  
+  db.multi();
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
@@ -301,21 +336,23 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     .then(function(response){
       res.statusCode=200;
       res.end(JSON.stringify(response));
-      console.log("After",simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount);
     //Store everything in the cache
       if(options.data){
         versionHash={};
         db.multi();
         response.index.forEach(function(data){
           versionHash[data.id]=data.v;
-          db.hmset(itemKey(req.user.userId,req.params.bucket,data.id),data.d);
+          if(Object.keys(data.d).length){
+            db.hmset(itemKey(req.user.userId,req.params.bucket,data.id),data.d);
+          } else{
+            console.log("Skipping over "+itemKey(req.user.userId,req.params.bucket,data.id)+" because it's an empty object");
+          }
         });
         db.hmset(versionKey(req.user.userId,req.params.bucket),versionHash);
-        db.hmset(indexHash);
         db.exec().then(function(){
-          log("Successfully cached "+res.length+" items in "+bucketName);
+          log("Successfully cached "+res.length+" items in "+req.params.bucket);
         },function(error){
-          log("Unsucessfully cached elements in "+bucketName+":  Error "+error);
+          log("Unsucessfully cached elements in "+req.params.bucket+":  Error "+error);
         });
       }
     },function(err){
@@ -326,13 +363,14 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   }
 });
 
-app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectGet);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectGet);
+app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(objectPost);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(objectPost);
 
 
 //Admin routes
 app.route("/admin/test").all(function(req,res,next){
   testData(req.query.ds).then(function(user){
+    console.log(req.query.ds);
     res.end(JSON.stringify(user));
   });
 });
@@ -364,6 +402,9 @@ io.on('connection',function(socket){
       if(payload.length=4){
         appName=payload[2];
         apiKey=payload[3];
+      } else{
+        appName=simperiumAppName;
+        apiKey=simperiumApiKey;
       }
       authorizeUser({username:username
         ,password:password
@@ -383,7 +424,8 @@ io.on('connection',function(socket){
           log(error);
         });
       },function(error){
-          socket.emit("reply","error authorizing user");
+          socket.emit("reply","error authorizing user "+error);
+          log(error);
       });
     }
   });
@@ -551,6 +593,7 @@ io.on('connection',function(socket){
       socket.emit("error","downsync requires options");
     }
   });//incomplete
+    
   log("io connection detected");
 })
 
@@ -676,7 +719,11 @@ function cacheBucket(userId,bucketName,overwrite){
         db.multi();
         res.forEach(function(data){
           versionHash[itemKey(userId,bucketName,data.id)]=data.v;
-          db.hmset(itemKey(userId,bucketName,data.id),data.d);
+          if(Object.keys(data.d).length){
+            db.hmset(itemKey(userId,bucketName,data.id),data.d);
+          } else{
+            console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");
+          }
         });
         promiseArray=[];
         db.hmset(versionKey(userId,bucketName),versionHash);
@@ -729,17 +776,17 @@ function testData(downsync){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
-      if(downsync!=false){
+      if(downsync!="false"){
         for(var key in user.buckets){
           ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
         }
-        Promise.all(ary).then(function(response){
-          fulfill(user);
-        },function(error){
-          reject(error);
-          log(error);
-        });
       }
+      Promise.all(ary).then(function(response){
+        fulfill(user);
+      },function(error){
+        reject(error);
+        log(error);
+      });
     });
   });
 }

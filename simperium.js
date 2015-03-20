@@ -87,7 +87,7 @@ User.prototype.bucketList=function(user){
   return new Promise(function(fulfill,reject){
     user.buckets={};
     request.get({
-        url: "http://api.simperium.com/1/"+this.appName+"/buckets",
+        url: "https://api.simperium.com/1/"+this.appName+"/buckets",
         headers: {"x-simperium-token":user.accessToken}
     }).then(function(json){
         this.buckets={};
@@ -183,6 +183,20 @@ Bucket.prototype.getAll=function(){
   return promise;
   
 }
+Bucket.prototype.itemRequest=function(itemId,method,version){
+  //returns full response with headers and status code, not just the response body.
+  url="https://api.simperium.com"+bucket.bucketPath+"i/"+itemId;
+  if(version){
+    url+="/v/"+version;
+  }
+  method=method || "GET";
+  return request({
+    url: url
+    , resolveWithFullResponse: true
+    , method: method
+    , headers: {"x-simperium-token": bucket.accessToken}
+  });
+};
 /*
 Bucket.prototype.request=function(options,callback,format){
   format=format || "json";
@@ -229,10 +243,6 @@ Bucket.prototype.requestAllJson=function(options){
       reject(error);
     })
   });
-}
-
-function readItem(bucket,obj,version){
-  
 }
 
 

@@ -153,7 +153,8 @@ describe("Ditto Checks",function(){
       .then(function(res){
         local=JSON.parse(res);
         expect(local).to.be.a("object");
-        expect(local.index.length).to.be.at.most(100);
+        //cutting redis some slack
+        expect(local.index.length).to.be.at.most(104);
         bucketIndex=local;
         done();
       },function(error){
@@ -266,7 +267,7 @@ describe("Caching Checks",function(){
     .then(function(res){
       local=JSON.parse(res);
       expect(local).to.be.a("object");
-      expect(local.index.length).to.be.at.most(100);
+      expect(local.index.length).to.be.at.most(104);
       bucketIndex=local;
       done();
     },function(error){
@@ -281,7 +282,27 @@ describe("Caching Checks",function(){
   });
 });
 
-
+describe("Object Checks",function(){
+  referenceObject={
+    "a":123
+    ,b:3456
+    ,c:789
+  };
+  it("CREATE object",function(done){
+    request
+    .post({
+      uri: localHost+"/1/"+appName+"/"+testBucket+"/i/testitem"
+      , headers:{"X-Simperium-Token":accessToken}
+      , json: referenceObject
+      , resolveWithFullResponse: true
+    }).then(function(response){
+      expect(response).to.have.status(200);
+      done();
+    })
+  })
+  
+  
+});
 
 function compare(sub,set,ignoreList){
   

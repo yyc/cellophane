@@ -1,6 +1,6 @@
 {
-  "name": "Cellophane",
-  "version": "0.0.1",
+  "name": "Cellophane.js",
+  "version": "0.8.0",
   "private":true,
   "description": "A translucent caching and conflict-resolving wrapper for Simperium API calls",
   "dependencies": {
