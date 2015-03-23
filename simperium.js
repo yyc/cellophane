@@ -306,7 +306,6 @@ function makeRequest(options,callback,format){
 }
 
 
-
 function log(options){
   if (process.env.NODE_ENV !== 'test') {
     console.log(options);

@@ -286,7 +286,7 @@ describe("Object Checks",function(){
   referenceObject={
     "a":123
     ,b:3456
-    ,c:789
+    ,c:"asdasd"
   };
   it("CREATE object",function(done){
     request
@@ -294,11 +294,15 @@ describe("Object Checks",function(){
       uri: localHost+"/1/"+appName+"/"+testBucket+"/i/testitem"
       , headers:{"X-Simperium-Token":accessToken}
       , json: referenceObject
-      , resolveWithFullResponse: true
+      , qs:{
+        response:1
+        ,replace: 1
+      }
     }).then(function(response){
-      expect(response).to.have.status(200);
+      result=compare(response,referenceObject);
+      expect(result).to.equal(0);
       done();
-    })
+    });
   })
   
   
@@ -343,7 +347,6 @@ function typeOf(input) {
 	return ({}).toString.call(input).slice(8, -1).toLowerCase();
 }
 
-
 function getResponse(res,format){
   format= format || "json";
   return new Promise(function(fulfill,reject){
@@ -353,7 +356,7 @@ function getResponse(res,format){
     });
     res.on("end",function(){
       if(format=="json"){
-        fulfill(response);
+        fulfill(JSON.parse(response));
       } else{
         fulfill(response);
       }

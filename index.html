@@ -80,8 +80,9 @@
       <li><a href="#" onclick="$('#command').val('token 335eaa6528a6402cb4c9a445d87b3d4b yyc478@gmail.com')">token accessToken username </a>: associate an access Token with an added username
       <li><a href="#" onclick="$('#command').val('delete yyc478@gmail.com')">delete username</a> : stops listening for the user with the given username</li>
       <li><a href="#" onclick="$('#command').val('option set simperiumSync true')">option set|delete|list|reset [key] [value]</a> : performs the appropriate action with the given key/value pair</li>
-      <li><a href="#" onclick="$('#command').val('upsync yyc478@gmail.com')">push username [--overwrite]</a> Pushes all data for the given user to Simperium</li> 
-      <li><a href="#" onclick="$('#command').val('downsync yyc478@gmail.com')">pull username [--overwrite]</a> Pulls all data for the given user to Simperium</li> 
+      <li><a href="#" onclick="$('#command').val('upsync yyc478@gmail.com')">upsync username [--overwrite]</a> Pushes all data for the given user to Simperium</li> 
+      <li><a href="#" onclick="$('#command').val('downsync yyc478@gmail.com')">downsync username [--overwrite]</a> Pulls all data for the given user to Simperium</li> 
+      <li><a href="#" onclick="$('#command').val('store keys *')">store redis-command [args..]</a>Perform a redis command with the given arguments and return the result</li>
     </ul>
   </body>
 </html>

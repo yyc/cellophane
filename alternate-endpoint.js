@@ -279,56 +279,68 @@ var readJsonBody=function(req,res,next){
       next();
     }else{
       res.statusCode=400;
-      res.end("Invalid data sent");
+      res.end("Bad Request, Check Input Data");
     }
   });
 }
 var objectPost=function(req,res,next){
-  db.multi();
+  db.multi();index=0;
   if(req.query.ccid){
     //check if change has been submitted before. ccid=client change id
-    db.zscore(ccidsKey(req.user.userId,req.params.bucket),req.query.ccid);
+    db.zscore(ccidsKey(req.user.userId,req.params.bucket),req.query.ccid);index++;
   }
   //check for version numbers to determine whether I should overwrite
   db.hget(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+  hashindex=index;
+  index++;
   db.exec().then(function(response){
     if((req.query.ccid&&response[0]!=null)||!req.query.ccid){
-      db.multi();
+      db.multi();multiIndex=0;
       if(req.query.replace=="1"||req.query.replace==1){
-        db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+        db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
       }
       changeLog=req.params;
       changeLog.d=req.json;
       changeLog.id=req.params.object_id;
-      if((req.query.ccid&&response[1]!=null)||(!req.query.ccid&&response[0]!=null)){
-        //Object exists
-        
-      }else{
-        //Object doesn't exist. CREATE!
-        if(req.query.ccid){
-          ccid=req.query.ccid;
-        }
-        else{
-          ccid=uuid.v4()
-        }
-        db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);
-        db.hset(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
-        db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,
+      if(req.query.ccid){
+        ccid=req.query.ccid;
       }
+      else{
+        ccid=uuid.v4()
+      }
+      db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);multiIndex++
+      db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,changeLog);multiIndex++
       //increment version
-      db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
-      if(req.query.response)
-        
-      })
-    else{
+      versionIndex=multiIndex;
+      db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);multiIndex++
+      if(req.query.response){
+        var hgetAllIndex=multiIndex;
+        db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
+      }
+      db.exec().then(function(response2){
+        if(response2!=null){
+          res.statusCode=200;
+          res.setHeader("X-Simperium-Version",response2[versionIndex]);
+          if(req.query.response){
+            res.end(JSON.stringify(parseArray(response2[hgetAllIndex])));
+          } else{
+            res.end("");
+          }
+        } else{
+          res.statusCode=500;
+          res.statusMessage="redis error";
+          res.end();
+        }
+      });
+    } else{
       res.statusCode=412;
       if(req.query.response){
         db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
         .then(function(response){
-          res.end(JSON.stringify(response));
+          res.end(JSON.stringify(parseArray(response)));
         })
       }else{
-        res.end();        
+        res.end();
       }
     }
   })
@@ -427,8 +439,8 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   }
 });
 
-app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(objectPost);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent,objectGet).post(readJsonBody,objectPost);
+app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectPresent).get(objectGet).post(readJsonBody).post(objectPost);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent).get(objectGet).post(readJsonBody).post(objectPost);
 
 
 //Admin routes
@@ -453,9 +465,6 @@ app.get("/socket.io/socket.io.js",function(req,res,next){
 */
 
 io.on('connection',function(socket){
-  socket.on("addLogin",function(data){
-    
-  });
   socket.on("list",function(payload){
     socket.emit("listing",activeUsers);
   });
@@ -541,7 +550,7 @@ io.on('connection',function(socket){
   });
   socket.on("test",function(payload){
     process.env.NODE_ENV = "dev";
-    testData().then(function(user){
+    testData(payload[0]).then(function(user){
       socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
     },function(error){
       socket.emit("reply","error authorizing user"+error);
@@ -625,7 +634,7 @@ io.on('connection',function(socket){
     }else{
       socket.emit("error","upsync requires options");
     }
-  });//incomplete
+  });
   socket.on("downsync",function(payload){
     if(payload[0]){
       if(activeUsers[payload[0]]){
@@ -639,12 +648,6 @@ io.on('connection',function(socket){
           }
           Promise.all(bucketPromises).then(function(){
             socket.emit("reply","Downsync complete");
-/*
-            store.keys(userId+"-*").then(function(ary){
-              socket.emit("reply","listing follows");
-              socket.emit("listing",ary);
-            });
-*/
           })
         }
         else{
@@ -841,7 +844,8 @@ function testData(downsync){
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
       captureTokens[accessToken]=activeUsers[testUsername];
-      if(downsync!="false"){
+      console.log(downsync);
+      if(downsync!="false"&&downsync!=false){
         for(var key in user.buckets){
           ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
         }
@@ -854,4 +858,12 @@ function testData(downsync){
       });
     });
   });
+}
+function parseArray(array){
+  hash={};
+  for(i=0;i<array.length;i+=2){
+    val=parseInt(array[i+1]);
+    hash[array[i]]=isNaN(val)?array[i+1]:val;
+  }
+  return hash;
 }
