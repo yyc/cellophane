@@ -1,4 +1,5 @@
 process.env.NODE_ENV = 'test';
+//Load required libraries
 var express=require("express");
 var app=express();
 var router=express.Router();
@@ -6,29 +7,37 @@ var http=require("http");
 var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
-var DeferredStore=require("object-store").DeferredStore;
 var uuid=require("node-uuid");
+
+
+module.exports={
+  start:start
+  , app: app
+  , test: testData
+  };
+
+//Load internal utilities
 var simperium=require("./simperium");
 var merge=require("./merge_recursively")
+
+//Load default configurations
 var configs=require("./config.js");
 var simperiumAppName =configs.appName;
 var simperiumApiKey = configs.apiKey;
 var testUsername=configs.username;
 var testPassword=configs.password;
 var port = configs.port;
-var captureTokens={};
-var activeUsers={};
-var defaultOptions={stickyAttendance:false
-  , simperiumSync:true
-};
+var defaultOptions=configs.options;
 if(process.env.OPTIONS){
   merge(defaultOptions,JSON.parse(process.env.OPTIONS));
 }
 var options={};
+var captureTokens={};
+var activeUsers={};
 merge(options,defaultOptions);
 
+//Setup Redis
 var redis=require("then-redis");
-
 if (process.env.REDISTOGO_URL) {
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
   var db = redis.createClient(rtg.port, rtg.hostname);
@@ -59,15 +68,9 @@ db.scanSet=function(key){
     });
   });
 }
-var versions=new DeferredStore("memory");
 
 var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
 
-module.exports={
-  start:start
-  , app: app
-  , test: testData
-  };
 function start(done){
 
 
@@ -227,6 +230,8 @@ var objectGet=function(req,res,next){
       res.statusCode=200;
       res.end(JSON.stringify(response));
     }else{
+      res.statusCode=404;
+      res.end(notFound);
     }
   });
 }
@@ -346,6 +351,22 @@ var objectPost=function(req,res,next){
   })
 
 }
+var objectDel=function(req,res,next){
+  db.multi();
+  db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+  db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
+  db.exec().then(function(response){
+    if(response!=null){
+      res.setHeader("X-Simperium-Version",response[1]);
+      res.statusCode=200;
+      res.end();
+    }
+    else{
+      res.statusCode=500;
+      res.statusMessage="Redis storage error";
+    }
+  })
+}
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     var idSlice=req.user.userId.length+req.params.bucket.length+2;
@@ -439,8 +460,15 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   }
 });
 
-app.route("/1/:appName/:bucket/i/:object_id").all(apiAll).all(objectAll).get(objectPresent).get(objectGet).post(readJsonBody).post(objectPost);
-app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll).get(objectPresent).get(objectGet).post(readJsonBody).post(objectPost);
+app.route("/1/:appName/:bucket/i/:object_id")
+.all(apiAll).all(objectAll)
+.get(objectPresent).get(objectGet)
+.post(readJsonBody).post(objectPost)
+.delete(objectPresent).delete(objectDel);
+app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectAll)
+.get(objectPresent).get(objectGet)
+.post(readJsonBody).post(objectPost)
+.delete(objectPresent).delete(objectDel);
 
 
 //Admin routes
@@ -684,6 +712,9 @@ function passthrough(opts,req,res,callback){
   remote=https.request(options,function(response){
     res.statusCode=response.statusCode;
     res.statusMessage=response.statusMessage;
+    if(response.headers['x-simperium-version']){
+      res.setHeader("X-Simperium-Version",response.headers['x-simperium-version']);
+    }
     response.pipe(res).on("end",function(){
       if(typeof callback == "function"){
         callback();

@@ -303,8 +303,18 @@ describe("Object Checks",function(){
       expect(result).to.equal(0);
       done();
     });
-  })
-  
+  });
+  it("DELETE object",function(done){
+    request
+    .del({
+      uri: localHost+"/1/"+appName+"/"+testBucket+"/i/testitem"
+      , headers:{"X-Simperium-Token":accessToken}
+      , resolveWithFullResponse:true
+    }).then(function(response){
+      expect(response.statusCode).to.equal(200);
+      done();
+    });
+  });
   
 });
 
