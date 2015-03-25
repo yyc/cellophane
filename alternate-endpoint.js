@@ -1,4 +1,3 @@
-process.env.NODE_ENV = 'test';
 //Load required libraries
 var express=require("express");
 var app=express();
@@ -35,6 +34,7 @@ if(process.env.OPTIONS){
 var options={};
 var captureTokens={};
 var activeUsers={};
+var activeApps={};
 merge(options,defaultOptions);
 
 //Setup Redis
@@ -186,8 +186,8 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   log("DELETE");
   next();
 });
-//Requests to api.simperium.com
 
+//Requests to api.simperium.com
 //Middleware
 var apiAll=function(req,res,next){
   //filters for tokens of interest and ignores the rest (passes them through directly)
@@ -520,6 +520,7 @@ io.on('connection',function(socket){
         socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
+        activeApps[appName]=1;
         for(var key in user.buckets){
           ary.push(cacheBucket(user,key));
         }
@@ -698,13 +699,42 @@ io.on('connection',function(socket){
 })
 
 //SocketJS to handle WebSocket API calls
-var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
-, prefix:"/sock/1/hithere"});
+var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
 interceptor.on('connection', function(conn) {
-    console.log(conn);
+    var heartBeatCount=0;
+    var intercept=true;
+    var remote;
     conn.on('data', function(message) {
-        console.log(message);
-        conn.write(message);
+      if(message[0]=='h'){ // heartbeat
+        conn.write("h:"+heartBeatCount);
+        heartBeatCount++;
+      }
+      else{
+        if(!intercept){ // don't intercept, just let it go
+          remote.send(message);
+        } else{
+          heads=message.split(':',2);
+          data=message.slice(heads[0].length+heads[1].length+2);
+          switch(heads[1]){
+            case "init":
+              json=JSON.parse(data);
+              if(captureTokens[json.token]){
+                user = simperium.getUserByToken(json.token);
+                conn.write("0:auth:"+user.username);
+              } else{ //not interested, create new remote connection and pass everything through
+                remote = new sockClient('https://api.simperium.com/sock/1/'+userid+"/");
+                intercept=false;
+                remote.onopen=function(){
+                  remote.send(message);
+                }
+                remote.onmessage=function(message){
+                  conn.write(message.data);
+                }
+              }
+            break;
+          }
+        }
+      }
     });
     conn.on('close', function() {});
 });
@@ -745,10 +775,10 @@ proxy.on('connection', function(conn) {
     });
 */
 });
-app.route("/sock/1/:user_id/info").get(function(req,res,next){
+app.route("/sock/1/:app_id/info").get(function(req,res,next){
     //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
   prefixUrl=req.url.slice(0,-5);
-  if(activeUsers[req.params.user_id]){
+  if(activeApps[req.params.app_id]){
     res.statusCode=101;
     res.statusMessage="Switching Protocols";
     //Strip out the /info
