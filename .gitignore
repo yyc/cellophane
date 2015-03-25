@@ -31,6 +31,7 @@ api.txt
 
 #personal test stuff
 test.js
+misc
 
 #redis dump
 dump.rdb

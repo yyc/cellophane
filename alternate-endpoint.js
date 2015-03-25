@@ -8,7 +8,8 @@ var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
 var uuid=require("node-uuid");
-
+var sockjs = require('sockjs');
+var sockClient = require('sockjs-client-node');
 
 module.exports={
   start:start
@@ -486,12 +487,16 @@ app.route("/admin").all(function(req,res,next){
 }).get(function(req,res,next){
   res.sendFile(__dirname+"/index.html");
 });
+app.route("/misc/*").get(function(req,res,next){
+  res.sendFile(__dirname+"/misc/"+req.url.slice(6));
+})
 /*
 app.get("/socket.io/socket.io.js",function(req,res,next){
   res.sendFile(__dirname+"/node_modules/socket.io/lib/client.js")
 });
 */
 
+//Admin page, might switch over to webSockets as well and remove socket.io
 io.on('connection',function(socket){
   socket.on("list",function(payload){
     socket.emit("listing",activeUsers);
@@ -691,6 +696,74 @@ io.on('connection',function(socket){
     
   log("io connection detected");
 })
+
+//SocketJS to handle WebSocket API calls
+var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
+, prefix:"/sock/1/hithere"});
+interceptor.on('connection', function(conn) {
+    console.log(conn);
+    conn.on('data', function(message) {
+        console.log(message);
+        conn.write(message);
+    });
+    conn.on('close', function() {});
+});
+var proxy = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
+});
+proxy.on('connection', function(conn) {
+    params=conn.url.split("/");
+    userid=params[3];
+    remote = new sockClient('https://api.simperium.com/sock/1/'+userid+"/");
+    remote.onopen=function(){
+      console.log("connected");
+    };
+    conn.on('data', function(message) {
+      if(remote.readyState==1){
+        remote.send(message);
+        console.log("sending to remote",message);
+      }
+    });
+/*
+    conn.on('close', function() {
+      remote.close();
+      console.log("local closed");
+    });
+*/
+    remote.onmessage=function(message){
+      if(conn.writable){
+        conn.write(message.data);
+        console.log("sending to local",message.data);
+      }
+    };
+/*
+    remote.on("close",function(){
+      if(conn.writable){
+        conn.write("closing");
+        conn.close();
+        console.log("remote closed");
+      }
+    });
+*/
+});
+app.route("/sock/1/:user_id/info").get(function(req,res,next){
+    //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
+  prefixUrl=req.url.slice(0,-5);
+  if(activeUsers[req.params.user_id]){
+    res.statusCode=101;
+    res.statusMessage="Switching Protocols";
+    //Strip out the /info
+    interceptor.installHandlers(httpListener, {prefix:prefixUrl});
+    res.end(JSON.stringify({"websocket":true,"origins":["*:*"],"cookie_needed":false,"entropy":(Math.random()*1000000000)}));
+  } else{ //Ignore connection and pass it on to the actual simperium endpoint.
+    res.statusCode=301;
+    res.statusMessage="Moved Permanently";
+    res.setHeader("Location","https://api.simperium.com"+req.url);
+    //Have to actually act as a proxy instead of redirecting because of same-origin policies
+    proxy.installHandlers(httpListener, {prefix:prefixUrl});
+    res.end();
+  }
+});
+
 
 httpListener.listen(port,function(){
   if(done){
