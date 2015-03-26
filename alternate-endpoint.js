@@ -736,7 +736,6 @@ interceptor.on('connection', function(conn) {
                 if(typeof channels[channel].itemCount=="number"){
                   db.hscan(versionsKey(user,channels[channel].bucketName),0,{"count":100})
                   .then(function(keys){
-                    console.log(keys);
                     if(keys[0]){
                       mark=keys[0];
                     }
@@ -761,7 +760,6 @@ interceptor.on('connection', function(conn) {
                             });
                           });
                           fulfill(index,mark);
-                          console.log("fulfilled",index.length);
                         },function(error){
                           reject("Error retrieving objects");
                         });
