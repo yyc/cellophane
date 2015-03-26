@@ -721,6 +721,8 @@ interceptor.on('connection', function(conn) {
               if(captureTokens[json.token]){
                 user = simperium.getUserByToken(json.token);
                 conn.write("0:auth:"+user.username);
+                //send index
+                
               } else{ //not interested, create new remote connection and pass everything through
                 remote = new sockClient('https://api.simperium.com/sock/1/'+userid+"/");
                 intercept=false;
@@ -753,19 +755,18 @@ proxy.on('connection', function(conn) {
         console.log("sending to remote",message);
       }
     });
-/*
     conn.on('close', function() {
-      remote.close();
-      console.log("local closed");
+      if(remote.readyState==1){
+        remote.close();
+        console.log("local closed");
+      }
     });
-*/
     remote.onmessage=function(message){
       if(conn.writable){
         conn.write(message.data);
         console.log("sending to local",message.data);
       }
     };
-/*
     remote.on("close",function(){
       if(conn.writable){
         conn.write("closing");
@@ -773,8 +774,8 @@ proxy.on('connection', function(conn) {
         console.log("remote closed");
       }
     });
-*/
 });
+
 app.route("/sock/1/:app_id/info").get(function(req,res,next){
     //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
   prefixUrl=req.url.slice(0,-5);
