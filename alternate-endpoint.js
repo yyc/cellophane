@@ -296,7 +296,7 @@ var objectPost=function(req,res,next){
     db.zscore(ccidsKey(req.user.userId,req.params.bucket),req.query.ccid);index++;
   }
   //check for version numbers to determine whether I should overwrite
-  db.hget(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id));
+  db.hget(versionsKey(req.user.userId,req.params.bucket),req.params.object_id);
   hashindex=index;
   index++;
   db.exec().then(function(response){
@@ -318,7 +318,7 @@ var objectPost=function(req,res,next){
       db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,changeLog);multiIndex++
       //increment version
       versionIndex=multiIndex;
-      db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);multiIndex++
+      db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);multiIndex++
       if(req.query.response){
         var hgetAllIndex=multiIndex;
         db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
@@ -355,7 +355,7 @@ var objectPost=function(req,res,next){
 var objectDel=function(req,res,next){
   db.multi();
   db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));
-  db.hincrby(versionsKey(req.user.userId,req.params.bucket),itemKey(req.user.userId,req.params.bucket,req.params.object_id),1);
+  db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);
   db.exec().then(function(response){
     if(response!=null){
       res.setHeader("X-Simperium-Version",response[1]);
@@ -370,12 +370,11 @@ var objectDel=function(req,res,next){
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
-    var idSlice=req.user.userId.length+req.params.bucket.length+2;
     var mark=req.query.mark || 0;
     var limit=req.query.limit || 100;
     db.hscan(versionsKey(req.user.userId,req.params.bucket),mark,{"count":limit})
     .then(function(keys){
-      if(keys[0]){
+      if(keys[0]&&keys[0]!=0){
         mark=keys[0];
       }
       else{
@@ -386,10 +385,12 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
         if(req.query.data=="true"){
           if(Object.keys(keys[1]).length){
             keyArray=Object.keys(keys[1]);
-            db.mget(keyArray).then(function(objArray){
+            db.mget(keyArray.map(function(key){
+              return itemKey(req.user.userId,req.params.bucket,key)
+            })).then(function(objArray){
             for(i=0;i<keyArray.length;i++){
                 index.push({
-                  id: keyArray[i].slice(idSlice)
+                  id: keyArray[i]
                   , d: objArray[i]
                   , v: keys[1][keyArray[i]]
                 });
@@ -406,7 +407,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
         else{
           for(i=0;i<keyArray.length;i++){
             index.push({
-                id: keyArray[i].slice(idSlice)
+                id: keyArray[i]
                 , v: keys[1][keyArray[i]]
             });
             fulfill(index,mark);
@@ -421,6 +422,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
         res.end(JSON.stringify({
           index:index
           ,current:curr
+          ,mark:mark
           }));
       })
     },function(error){
@@ -439,16 +441,18 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
         versionHash={};
         db.multi();
         response.index.forEach(function(data){
-          versionHash[data.id]=data.v;
           if(Object.keys(data.d).length){
+            versionHash[data.id]=data.v;
             db.hmset(itemKey(req.user.userId,req.params.bucket,data.id),data.d);
           } else{
             console.log("Skipping over "+itemKey(req.user.userId,req.params.bucket,data.id)+" because it's an empty object");
           }
         });
-        db.hmset(versionsKey(req.user.userId,req.params.bucket),versionHash);
+        if(Object.keys(versionHash).length){
+          db.hmset(versionsKey(req.user.userId,req.params.bucket),versionHash);
+        }
         db.exec().then(function(){
-          log("Successfully cached "+res.length+" items in "+req.params.bucket);
+          log("Successfully cached "+Object.keys(versionHash).length+" items in "+req.params.bucket);
         },function(error){
           log("Unsucessfully cached elements in "+req.params.bucket+":  Error "+error);
         });
@@ -704,6 +708,8 @@ interceptor.on('connection', function(conn) {
     var heartBeatCount=0;
     var intercept=true;
     var remote;
+    var user;
+    var channels=[];
     conn.on('data', function(message) {
       if(message[0]=='h'){ // heartbeat
         conn.write("h:"+heartBeatCount);
@@ -719,12 +725,110 @@ interceptor.on('connection', function(conn) {
             case "init":
               json=JSON.parse(data);
               if(captureTokens[json.token]){
-                user = simperium.getUserByToken(json.token);
-                conn.write("0:auth:"+user.username);
+                user = captureTokens[json.token];
+                conn.write(heads[0]+":auth:"+simperium.getUserById(user).username);
+                channel=parseInt(heads[0]);
+                if(isNaN(channel)){
+                  channel=channels.length;
+                }
                 //send index
-                
+                channels[channel]=simperium.getUserById(user).getBucket(json.name);
+                if(typeof channels[channel].itemCount=="number"){
+                  db.hscan(versionsKey(user,channels[channel].bucketName),0,{"count":100})
+                  .then(function(keys){
+                    console.log(keys);
+                    if(keys[0]){
+                      mark=keys[0];
+                    }
+                    else{
+                      mark=undefined;
+                    }
+                    return new Promise(function(fulfill,reject){
+                      if(Object.keys(keys[1]).length){
+                        keyArray=Object.keys(keys[1]);
+                        db.multi();
+                        keyArray.forEach(function(key){
+                          db.hgetall(itemKey(user,channels[channel].bucketName,key));
+                          return key;
+                        });
+                        db.exec().then(function(objArray){
+                          var index=[];
+                          keyArray.forEach(function(key,i){
+                            index.push({
+                              id: key
+                              , d: parseArray(objArray[i])
+                              , v: parseInt(keys[1][key])
+                            });
+                          });
+                          fulfill(index,mark);
+                          console.log("fulfilled",index.length);
+                        },function(error){
+                          reject("Error retrieving objects");
+                        });
+                      } else{
+                      fulfill(index,mark);
+                      }
+                    });
+                  },function(error){
+                      log("hgetall failed "+error);
+                  })
+                  .then(function(index,mark){
+                    db.get(currentKey(user,channels[channel].bucketName)).then(function(curr){
+                      conn.write(channel+':'+'i:'+JSON.stringify({
+                        index:index
+                        ,current:curr
+                        ,mark:mark
+                        }));
+                    })
+                  },function(error){
+                    log(error);
+                  });
+                }else{
+                  remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
+                  intercept=false;
+                  remote.onopen=function(){
+                    remote.send(message);
+                  }
+                  remote.onmessage=function(msg){
+                    hd=msg.data.split(':',2)
+                    if(hd[1]=='i'){
+                      //cache incomplete, continue
+                      data=msg.data.slice(hd[0].length+hd[1].length+2);
+                      //cache data
+                      response=JSON.parse(data);
+                      versionHash={};
+                      db.multi();
+                      response.index.forEach(function(data){
+                        versionHash[data.id]=data.v;
+                        if(Object.keys(data.d).length){
+                          db.hmset(itemKey(user,channels[channel].bucketName,data.id),data.d);
+                        } else{
+                          console.log("Skipping over "+itemKey(user,channels[channel].bucketName,data.id)+" because it's an empty object");
+                        }
+                      });
+                      if(Object.keys(versionHash).length){
+                        db.hmset(versionsKey(user,channels[channel].bucketName),versionHash);
+                      }
+                      db.exec().then(function(){
+                        channels[channel].itemCount=JSON.stringify((parseInt(channels[channel].itemCount)||0)+Object.keys(versionHash).length);
+                        log("Successfully cached "+Object.keys(versionHash).length+" items in "+channels[channel].bucketName);
+                        db.hlen(versionsKey(user,channels[channel].bucketName)).then(function(len){
+                          console.log(len);
+                        });
+                        if(!response.mark){
+                          console.log("Cache complete, stored "+channels[channel].itemCount+" items");
+                          channels[channel].itemCount=(parseInt(channels[channel].itemCount));
+                        }
+                        conn.write(channel+':'+'i:'+data);
+                      },function(error){
+                        log("Unsucessfully cached elements in "+channels[channel].bucketName+":  Error "+error);
+                        conn.write(channel+':'+'i:'+data);
+                      });
+                    }
+                  }
+                }
               } else{ //not interested, create new remote connection and pass everything through
-                remote = new sockClient('https://api.simperium.com/sock/1/'+userid+"/");
+                remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                 intercept=false;
                 remote.onopen=function(){
                   remote.send(message);
@@ -732,6 +836,66 @@ interceptor.on('connection', function(conn) {
                 remote.onmessage=function(message){
                   conn.write(message.data);
                 }
+              }
+            break;
+            case "cv":
+              //Cache complete
+              channel=parseInt(heads[0]);
+              conn.write(channel+":c:[]");
+            break;
+            case "i":
+              if(typeof channels[channel].itemCount=="number"){
+                query=data.split(":");
+                var mark=parseInt(query[1]);
+                var limit=query[3] || 100;
+                db.hscan(versionsKey(user,channels[channel].bucketName),mark,{"count":limit})
+                .then(function(keys){
+                  if(keys[0]){
+                    mark=keys[0];
+                  }
+                  else{
+                    mark=undefined;
+                  }
+                  return new Promise(function(fulfill,reject){
+                    var index=[];
+                    if(Object.keys(keys[1]).length){
+                      keyArray=Object.keys(keys[1]);
+                      db.mget(keyArray.map(function(key){
+                        return itemKey(user,channels[channel].bucketName,key)
+                      })).then(function(objArray){
+                      for(i=0;i<keyArray.length;i++){
+                          index.push({
+                            id: keyArray[i]
+                            , d: objArray[i]
+                            , v: keys[1][keyArray[i]]
+                          });
+                        }
+                        fulfill(index);
+                      },function(error){
+                        log("Error retrieving objects")
+                        reject(error);
+                      });
+                    } else{
+                    fulfill(index,mark);
+                    }
+                  });
+                },function(error){
+                    log("hgetall failed "+error);
+                })
+                .then(function(index,mark){
+                  db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
+                    conn.write(channel+':'+'i:'+JSON.stringify({
+                      index:index
+                      ,current:curr
+                      ,mark:mark
+                      }));
+                  })
+                },function(error){
+                  log(error);
+                });
+              }
+              else{
+                remote.send("0:i:"+data);
               }
             break;
           }
@@ -767,24 +931,27 @@ proxy.on('connection', function(conn) {
         console.log("sending to local",message.data);
       }
     };
-    remote.on("close",function(){
+    remote.onclose=function(){
       if(conn.writable){
         conn.write("closing");
         conn.close();
         console.log("remote closed");
       }
-    });
+    };
 });
 
 app.route("/sock/1/:app_id/info").get(function(req,res,next){
     //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
   prefixUrl=req.url.slice(0,-5);
+/*
   if(activeApps[req.params.app_id]){
-    res.statusCode=101;
-    res.statusMessage="Switching Protocols";
+    res.statusCode=200;
+    res.statusMessage="Go Here";
     //Strip out the /info
+*/
     interceptor.installHandlers(httpListener, {prefix:prefixUrl});
     res.end(JSON.stringify({"websocket":true,"origins":["*:*"],"cookie_needed":false,"entropy":(Math.random()*1000000000)}));
+/*
   } else{ //Ignore connection and pass it on to the actual simperium endpoint.
     res.statusCode=301;
     res.statusMessage="Moved Permanently";
@@ -793,8 +960,8 @@ app.route("/sock/1/:app_id/info").get(function(req,res,next){
     proxy.installHandlers(httpListener, {prefix:prefixUrl});
     res.end();
   }
+*/
 });
-
 
 httpListener.listen(port,function(){
   if(done){
@@ -920,7 +1087,7 @@ function cacheBucket(userId,bucketName,overwrite){
       if(res.length){
         db.multi();
         res.forEach(function(data){
-          versionHash[itemKey(userId,bucketName,data.id)]=data.v;
+          versionHash[data.id]=data.v;
           if(Object.keys(data.d).length){
             db.hmset(itemKey(userId,bucketName,data.id),data.d);
           } else{
