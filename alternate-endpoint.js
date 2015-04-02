@@ -9,6 +9,8 @@ var io=require("socket.io")(httpListener);
 var uuid=require("node-uuid");
 var sockjs = require('sockjs');
 var sockClient = require('sockjs-client-node');
+var jsondiff=require("./jsondiff-node");
+jd=new jsondiff();
 
 module.exports={
   start:start
@@ -297,7 +299,7 @@ var objectPost=function(req,res,next){
   }
   //check for version numbers to determine whether I should overwrite
   db.hget(versionsKey(req.user.userId,req.params.bucket),req.params.object_id);
-  hashindex=index;
+  hashIndex=index;
   index++;
   db.exec().then(function(response){
     if((req.query.ccid&&response[0]!=null)||!req.query.ccid){
@@ -314,11 +316,18 @@ var objectPost=function(req,res,next){
       else{
         ccid=uuid.v4()
       }
-      db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);multiIndex++
-      db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,changeLog);multiIndex++
+      db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,ccid);multiIndex++
+      db.set(ccidKey(ccid),JSON.stringify(changeLog));
+      if(!req.params.version||(req.params.version&&req.params.version>=parseInt(response[hashIndex]))){
+      db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);multiIndex++;
       //increment version
       versionIndex=multiIndex;
-      db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);multiIndex++
+      db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);multiIndex++;
+      }
+      else{
+        versionIndex=multiIndex;
+        db.hget(versionsKey(req.user.userId,req.params.bucket),req.params.object_id);multiIndex++;
+      }
       if(req.query.response){
         var hgetAllIndex=multiIndex;
         db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
@@ -326,6 +335,10 @@ var objectPost=function(req,res,next){
       db.exec().then(function(response2){
         if(response2!=null){
           res.statusCode=200;
+          if(req.params.version<parseInt(response[hashIndex])){
+            res.statusCode=412;
+            res.statusMessage="Not Modified";
+          }
           res.setHeader("X-Simperium-Version",response2[versionIndex]);
           if(req.query.response){
             res.end(JSON.stringify(parseArray(response2[hgetAllIndex])));
@@ -705,6 +718,13 @@ io.on('connection',function(socket){
 //SocketJS to handle WebSocket API calls
 var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
 interceptor.on('connection', function(conn) {
+    if (process.env.REDISTOGO_URL) {
+      var rtg   = require("url").parse(process.env.REDISTOGO_URL);
+      var rd = redis.createClient(rtg.port, rtg.hostname);
+      rb.auth(rtg.auth.split(":")[1]);
+    } else {
+      var rd=redis.createClient();
+    }
     var heartBeatCount=0;
     var intercept=true;
     var remote;
@@ -721,8 +741,10 @@ interceptor.on('connection', function(conn) {
         } else{
           heads=message.split(':',2);
           data=message.slice(heads[0].length+heads[1].length+2);
+          channel=parseInt(heads[0]);
           switch(heads[1]){
             case "init":
+                //authenticate and select bucket
               json=JSON.parse(data);
               if(captureTokens[json.token]){
                 user = captureTokens[json.token];
@@ -734,7 +756,7 @@ interceptor.on('connection', function(conn) {
                 //send index
                 channels[channel]=simperium.getUserById(user).getBucket(json.name);
                 if(typeof channels[channel].itemCount=="number"){
-                  db.hscan(versionsKey(user,channels[channel].bucketName),0,{"count":100})
+                  rd.hscan(versionsKey(user,channels[channel].bucketName),0,{"count":100})
                   .then(function(keys){
                     if(keys[0]){
                       mark=keys[0];
@@ -745,12 +767,12 @@ interceptor.on('connection', function(conn) {
                     return new Promise(function(fulfill,reject){
                       if(Object.keys(keys[1]).length){
                         keyArray=Object.keys(keys[1]);
-                        db.multi();
+                        rd.multi();
                         keyArray.forEach(function(key){
-                          db.hgetall(itemKey(user,channels[channel].bucketName,key));
+                          rd.hgetall(itemKey(user,channels[channel].bucketName,key));
                           return key;
                         });
-                        db.exec().then(function(objArray){
+                        rd.exec().then(function(objArray){
                           var index=[];
                           keyArray.forEach(function(key,i){
                             index.push({
@@ -771,7 +793,7 @@ interceptor.on('connection', function(conn) {
                       log("hgetall failed "+error);
                   })
                   .then(function(index,mark){
-                    db.get(currentKey(user,channels[channel].bucketName)).then(function(curr){
+                    rd.get(currentKey(user,channels[channel].bucketName)).then(function(curr){
                       conn.write(channel+':'+'i:'+JSON.stringify({
                         index:index
                         ,current:curr
@@ -795,22 +817,22 @@ interceptor.on('connection', function(conn) {
                       //cache data
                       response=JSON.parse(data);
                       versionHash={};
-                      db.multi();
+                      rd.multi();
                       response.index.forEach(function(data){
                         versionHash[data.id]=data.v;
                         if(Object.keys(data.d).length){
-                          db.hmset(itemKey(user,channels[channel].bucketName,data.id),data.d);
+                          rd.hmset(itemKey(user,channels[channel].bucketName,data.id),data.d);
                         } else{
                           console.log("Skipping over "+itemKey(user,channels[channel].bucketName,data.id)+" because it's an empty object");
                         }
                       });
                       if(Object.keys(versionHash).length){
-                        db.hmset(versionsKey(user,channels[channel].bucketName),versionHash);
+                        rd.hmset(versionsKey(user,channels[channel].bucketName),versionHash);
                       }
-                      db.exec().then(function(){
+                      rd.exec().then(function(){
                         channels[channel].itemCount=JSON.stringify((parseInt(channels[channel].itemCount)||0)+Object.keys(versionHash).length);
                         log("Successfully cached "+Object.keys(versionHash).length+" items in "+channels[channel].bucketName);
-                        db.hlen(versionsKey(user,channels[channel].bucketName)).then(function(len){
+                        rd.hlen(versionsKey(user,channels[channel].bucketName)).then(function(len){
                           console.log(len);
                         });
                         if(!response.mark){
@@ -836,17 +858,13 @@ interceptor.on('connection', function(conn) {
                 }
               }
             break;
-            case "cv":
-              //Cache complete
-              channel=parseInt(heads[0]);
-              conn.write(channel+":c:[]");
-            break;
             case "i":
+                //post index
               if(typeof channels[channel].itemCount=="number"){
                 query=data.split(":");
                 var mark=parseInt(query[1]);
                 var limit=query[3] || 100;
-                db.hscan(versionsKey(user,channels[channel].bucketName),mark,{"count":limit})
+                rd.hscan(versionsKey(user,channels[channel].bucketName),mark,{"count":limit})
                 .then(function(keys){
                   if(keys[0]){
                     mark=keys[0];
@@ -858,7 +876,7 @@ interceptor.on('connection', function(conn) {
                     var index=[];
                     if(Object.keys(keys[1]).length){
                       keyArray=Object.keys(keys[1]);
-                      db.mget(keyArray.map(function(key){
+                      rd.mget(keyArray.map(function(key){
                         return itemKey(user,channels[channel].bucketName,key)
                       })).then(function(objArray){
                       for(i=0;i<keyArray.length;i++){
@@ -881,7 +899,7 @@ interceptor.on('connection', function(conn) {
                     log("hgetall failed "+error);
                 })
                 .then(function(index,mark){
-                  db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
+                  rd.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:index
                       ,current:curr
@@ -896,11 +914,43 @@ interceptor.on('connection', function(conn) {
                 remote.send("0:i:"+data);
               }
             break;
+            case "cv":
+              //Cache complete              
+              conn.write(channel+":c:[]");
+            break;
+            case "c":
+              //Change object
+              json=JSON.parse(data);
+              console.log(json);
+              rd.hget(versionsKey(user,channels[channel].bucketName))
+              .then(function(res){
+                if(res!=null){
+                  if(json.sv>parseInt(res)){
+                    return rd.hgetall(itemKey(user,channels[channel].bucketName,json.id));
+                  }
+                }
+                else{
+                  //create new object
+                  rd.multi();
+                  rd.hincrby(versionsKey(user,channels[channel].bucketName),1);
+                  object=jd.apply_object_diff({},json.v);
+                }
+              },function(error){
+                return Promise.reject(error);
+              }).then(function(obj){
+                
+              },function(reject){
+                
+              });
+              
+            break;
           }
         }
       }
     });
-    conn.on('close', function() {});
+    conn.on('close', function() {
+      rd.quit();
+    });
 });
 var proxy = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
 });
@@ -1059,7 +1109,7 @@ function ccidsKey(userId,bucketName){
     return userId+"-"+bucketName+"~ccids";
 }
 function ccidKey(userId,bucketName,ccid){
-  return userId+"-"+bucketName+"/"+ccid;
+  return "ccid~"+ccid;
 }
 function currentKey(userId,bucketName){
     return userId+"-"+bucketName+"~current";
@@ -1094,7 +1144,7 @@ function cacheBucket(userId,bucketName,overwrite){
         });
         promiseArray=[];
         db.hmset(versionsKey(userId,bucketName),versionHash);
-        db.del(ccidKey(userId,bucketName));
+        db.del(ccidsKey(userId,bucketName));
         db.set(currentKey(userId,bucketName),current);
         db.exec().then(function(){
           log("Successfully cached "+res.length+" items in "+bucketName);
