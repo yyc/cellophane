@@ -9,8 +9,6 @@ var io=require("socket.io")(httpListener);
 var uuid=require("node-uuid");
 var sockjs = require('sockjs');
 var sockClient = require('sockjs-client-node');
-var jsondiff=require("./jsondiff-node");
-jd=new jsondiff();
 
 module.exports={
   start:start
@@ -20,7 +18,8 @@ module.exports={
 
 //Load internal utilities
 var simperium=require("./simperium");
-var merge=require("./merge_recursively")
+var cache=require("./cache")();
+var merge=require("./merge_recursively");
 
 //Load default configurations
 var configs=require("./config.js");
@@ -40,39 +39,9 @@ var activeApps={};
 merge(options,defaultOptions);
 
 //Setup Redis
-var redis=require("then-redis");
-if (process.env.REDISTOGO_URL) {
-  var rtg   = require("url").parse(process.env.REDISTOGO_URL);
-  var db = redis.createClient(rtg.port, rtg.hostname);
-  db.auth(rtg.auth.split(":")[1]);
-} else {
-  var db=redis.createClient();
-}
-db.scanSet=function(key){
-  return new Promise(function(fulfill,reject){
-    var promiseArray=[];
-    var set=[];
-    var handler=function(response){
-      return new Promise(function(fulfill,reject){
-        set=set.concat(response[1]);
-        if(response[0]!=0){
-          promiseArray.push(db.sscan(key,response[0]).then(handler,function(error){
-            reject(error);
-          }));
-        }
-        fulfill();
-      });
-    };
-    promiseArray.push(db.sscan(key,0).then(handler,function(error){
-      return Promise.reject(error);
-    }));
-    Promise.all(promiseArray).then(function(){
-      fulfill(set);
-    });
-  });
-}
 
 var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
+
 
 function start(done){
 
@@ -224,10 +193,7 @@ var objectAll=function(req,res,next){
   }
 }
 var objectGet=function(req,res,next){
-  if(req.params.version){
-    var objectVersion=req.params.version;
-  }
-  db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
+  cache.getObject(req.user.userId,req.params.bucket,req.params.object_id,req.params.version)
   .then(function(response){
     if(response){
       res.statusCode=200;
@@ -239,15 +205,15 @@ var objectGet=function(req,res,next){
   });
 }
 var objectPresent=function(req,res,next){
-  db.exists(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
+  cache.objectExists(req.user.userId,req.params.bucket,req.params.object_id,req.params.version)
   .then(function(response){
     if(response){
       next();
     }
     else{
-      simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
+       simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
       .then(function(response){
-        console.log(response.statusCode,response.body);
+        console.log(response.statusCode,response.json);
         res.statusCode=response.statusCode;
         if(response.headers["x-simperium-version"]){
           res.setHeader("X-Simperium-Version",response.headers["x-simperium-version"]);
@@ -292,78 +258,33 @@ var readJsonBody=function(req,res,next){
   });
 }
 var objectPost=function(req,res,next){
-  db.multi();index=0;
-  if(req.query.ccid){
-    //check if change has been submitted before. ccid=client change id
-    db.zscore(ccidsKey(req.user.userId,req.params.bucket),req.query.ccid);index++;
+  if(!req.json.ccid){
+    ccid=uuid.v4()
+  } else{
+    ccid=req.json.ccid;
   }
-  //check for version numbers to determine whether I should overwrite
-  db.hget(versionsKey(req.user.userId,req.params.bucket),req.params.object_id);
-  hashIndex=index;
-  index++;
-  db.exec().then(function(response){
-    if((req.query.ccid&&response[0]!=null)||!req.query.ccid){
-      db.multi();multiIndex=0;
-      if(req.query.replace=="1"||req.query.replace==1){
-        db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
-      }
-      changeLog=req.params;
-      changeLog.d=req.json;
-      changeLog.id=req.params.object_id;
-      if(req.query.ccid){
-        ccid=req.query.ccid;
-      }
-      else{
-        ccid=uuid.v4()
-      }
-      db.zadd(ccidsKey(req.user.userId,req.params.bucket),1,ccid);multiIndex++
-      db.set(ccidKey(ccid),JSON.stringify(changeLog));
-      if(!req.params.version||(req.params.version&&req.params.version>=parseInt(response[hashIndex]))){
-      db.hmset(itemKey(req.user.userId,req.params.bucket,req.params.object_id),req.json);multiIndex++;
-      //increment version
-      versionIndex=multiIndex;
-      db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);multiIndex++;
-      }
-      else{
-        versionIndex=multiIndex;
-        db.hget(versionsKey(req.user.userId,req.params.bucket),req.params.object_id);multiIndex++;
-      }
-      if(req.query.response){
-        var hgetAllIndex=multiIndex;
-        db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id));multiIndex++
-      }
-      db.exec().then(function(response2){
-        if(response2!=null){
-          res.statusCode=200;
-          if(req.params.version<parseInt(response[hashIndex])){
-            res.statusCode=412;
-            res.statusMessage="Not Modified";
-          }
-          res.setHeader("X-Simperium-Version",response2[versionIndex]);
-          if(req.query.response){
-            res.end(JSON.stringify(parseArray(response2[hgetAllIndex])));
-          } else{
-            res.end("");
-          }
-        } else{
-          res.statusCode=500;
-          res.statusMessage="redis error";
-          res.end();
-        }
-      });
+  options=req.query;
+  options.replace=(options.replace=="1"||options.replace==1);
+  options.version=req.params.version;
+  cache.objectSet(req.user.userId,req.params.bucket,req.params.object_id,req.body,options,ccid)
+  .then(function(success,version,response){
+    if(req.query.response){
+      res.write(JSON.stringify(parseArray(response2[hgetAllIndex])));
+    }
+    if(success){
+      res.statusCode=200;
+      res.setHeader("X-Simperium-Version",version);
     } else{
       res.statusCode=412;
-      if(req.query.response){
-        db.hgetall(itemKey(req.user.userId,req.params.bucket,req.params.object_id))
-        .then(function(response){
-          res.end(JSON.stringify(parseArray(response)));
-        })
-      }else{
-        res.end();
-      }
+      res.statusMessage="Not Modified";
     }
-  })
-
+    res.end();
+  },function(error){
+    log(error);
+    res.statusCode=500;
+    res.write(error);
+    res.end();
+  });
 }
 var objectDel=function(req,res,next){
   db.multi();
@@ -1116,53 +1037,17 @@ function currentKey(userId,bucketName){
 }
 function cacheBucket(userId,bucketName,overwrite){
   return new Promise(function(fulfill,reject){
-    twinArray=[];
-    if(overwrite){
-      twinArray.push(purgeBucket(userId,bucketName));
-    }
-    var res;
-    var current;
-    twinArray.push(simperium.getUserById(userId).getBucket(bucketName).getAll().then(function(response){
-      res=response.index;
-      current=response.current;
-      return Promise.resolve();
-    },function(error){
-      return Promise.reject();
-    }));
-    Promise.all(twinArray).then(function(){
-      versionHash={};
-      indexHash={};
-      if(res.length){
-        db.multi();
-        res.forEach(function(data){
-          versionHash[data.id]=data.v;
-          if(Object.keys(data.d).length){
-            db.hmset(itemKey(userId,bucketName,data.id),data.d);
-          } else{
-            console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");
-          }
-        });
-        promiseArray=[];
-        db.hmset(versionsKey(userId,bucketName),versionHash);
-        db.del(ccidsKey(userId,bucketName));
-        db.set(currentKey(userId,bucketName),current);
-        db.exec().then(function(){
-          log("Successfully cached "+res.length+" items in "+bucketName);
-          simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
-          fulfill();
-        },function(error){
-          log("Problem with caching"+error);
-          reject(error);
-        });
-      } else{
-        log(bucketName+" is empty, nothing cached.");
-        fulfill();
-      }
-    },function(error){
-      log("Problem with purging or getAll",error);
-      reject(error);
-    });
+  simperium.getUserById(userId).getBucket(bucketName).getAll()
+  .then(function(response){
+    return cache.cacheIndex(userId,bucketname,response,overwrite)
+  })
+  .then(function(itemIndex){
+    simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+    fulfill();
+  },function(error){
+    reject();
   });
+  }
 }
 function purgeBucket(userId,bucketName){
   return new Promise(function(fulfill,reject){
