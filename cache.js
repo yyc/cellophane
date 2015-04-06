@@ -146,8 +146,65 @@ module.exports=function(){
       });
     });
   }
-  mod.getIndex=function(userId,bucketName,data,limit){
-    
+  mod.getIndex=function(userId,bucketName,options){
+    return new Promise(function(fulfill,reject){
+      var mark=options.mark || 0;
+      var limit=options.limit || 100;
+      db.hscan(versionsKey(userId,bucket),mark,{"count":limit})
+      .then(function(keys){
+        if(keys[0]&&keys[0]!=0){
+          mark=keys[0];
+        }
+        else{
+          mark=undefined;
+        }
+        return new Promise(function(fulfill,reject){
+          var index=[];
+          if(req.query.data=="true"){
+            if(Object.keys(keys[1]).length){
+              keyArray=Object.keys(keys[1]);
+              db.mget(keyArray.map(function(key){
+                return itemKey(req.user.userId,req.params.bucket,key)
+              })).then(function(objArray){
+              for(i=0;i<keyArray.length;i++){
+                  index.push({
+                    id: keyArray[i]
+                    , d: objArray[i]
+                    , v: keys[1][keyArray[i]]
+                  });
+                }
+                fulfill(index);
+              },function(error){
+                log("Error retrieving objects")
+                reject(error);
+              });
+            } else{
+            fulfill(index,mark);
+            }
+          }
+          else{
+            for(i=0;i<keyArray.length;i++){
+              index.push({
+                  id: keyArray[i]
+                  , v: keys[1][keyArray[i]]
+              });
+              fulfill(index,mark);
+            }
+          }
+        });
+      },function(error){
+          log("hgetall failed "+error);
+          reject(error);
+      })
+      .then(function(index,mark){
+        db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
+          fulfill(index,curr,mark);
+        });
+      },function(error){
+        log(error);
+        reject(error);
+      });
+    });
   }
   
   mod.bucket=function(uid,bucket,subscribe){

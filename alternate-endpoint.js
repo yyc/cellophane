@@ -304,65 +304,16 @@ var objectDel=function(req,res,next){
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
-    var mark=req.query.mark || 0;
-    var limit=req.query.limit || 100;
-    db.hscan(versionsKey(req.user.userId,req.params.bucket),mark,{"count":limit})
-    .then(function(keys){
-      if(keys[0]&&keys[0]!=0){
-        mark=keys[0];
-      }
-      else{
-        mark=undefined;
-      }
-      return new Promise(function(fulfill,reject){
-        var index=[];
-        if(req.query.data=="true"){
-          if(Object.keys(keys[1]).length){
-            keyArray=Object.keys(keys[1]);
-            db.mget(keyArray.map(function(key){
-              return itemKey(req.user.userId,req.params.bucket,key)
-            })).then(function(objArray){
-            for(i=0;i<keyArray.length;i++){
-                index.push({
-                  id: keyArray[i]
-                  , d: objArray[i]
-                  , v: keys[1][keyArray[i]]
-                });
-              }
-              fulfill(index);
-            },function(error){
-              log("Error retrieving objects")
-              reject(error);
-            });
-          } else{
-          fulfill(index,mark);
-          }
-        }
-        else{
-          for(i=0;i<keyArray.length;i++){
-            index.push({
-                id: keyArray[i]
-                , v: keys[1][keyArray[i]]
-            });
-            fulfill(index,mark);
-          }
-        }
-      });
+    cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(index,curr,mark){
+      res.statusCode=200;
+      res.end(JSON.stringify({
+        index:index
+        ,current:curr
+        ,mark:mark
+      }));
     },function(error){
-        log("hgetall failed "+error);
-    })
-    .then(function(index,mark){
-      db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
-        res.end(JSON.stringify({
-          index:index
-          ,current:curr
-          ,mark:mark
-          }));
-      })
-    },function(error){
-      log(error);
       res.statusCode=500;
-      res.end(JSON.stringify(error));
+      res.end(error);
     });
   }else{
     options=req.query;
@@ -372,24 +323,7 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
       res.end(JSON.stringify(response));
     //Store everything in the cache
       if(options.data){
-        versionHash={};
-        db.multi();
-        response.index.forEach(function(data){
-          if(Object.keys(data.d).length){
-            versionHash[data.id]=data.v;
-            db.hmset(itemKey(req.user.userId,req.params.bucket,data.id),data.d);
-          } else{
-            console.log("Skipping over "+itemKey(req.user.userId,req.params.bucket,data.id)+" because it's an empty object");
-          }
-        });
-        if(Object.keys(versionHash).length){
-          db.hmset(versionsKey(req.user.userId,req.params.bucket),versionHash);
-        }
-        db.exec().then(function(){
-          log("Successfully cached "+Object.keys(versionHash).length+" items in "+req.params.bucket);
-        },function(error){
-          log("Unsucessfully cached elements in "+req.params.bucket+":  Error "+error);
-        });
+        cache.cacheIndex(req.user.userId,req.params.bucket,response.index,false);
       }
     },function(err){
       log(err);
@@ -1037,17 +971,17 @@ function currentKey(userId,bucketName){
 }
 function cacheBucket(userId,bucketName,overwrite){
   return new Promise(function(fulfill,reject){
-  simperium.getUserById(userId).getBucket(bucketName).getAll()
-  .then(function(response){
-    return cache.cacheIndex(userId,bucketname,response,overwrite)
-  })
-  .then(function(itemIndex){
-    simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
-    fulfill();
-  },function(error){
-    reject();
+    simperium.getUserById(userId).getBucket(bucketName).getAll()
+    .then(function(response){
+      return cache.cacheIndex(userId,bucketname,response,overwrite)
+    })
+    .then(function(itemIndex){
+      simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+      fulfill();
+    },function(error){
+      reject();
+    });
   });
-  }
 }
 function purgeBucket(userId,bucketName){
   return new Promise(function(fulfill,reject){
