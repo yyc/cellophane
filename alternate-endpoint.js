@@ -19,7 +19,7 @@ module.exports={
 //Load internal utilities
 var simperium=require("./simperium");
 var cachejs=require("./cache");
-cache=new cachejs();
+cache=new cachejs.Cache();
 var merge=require("./merge_recursively");
 
 //Load default configurations
@@ -598,8 +598,9 @@ interceptor.on('connection', function(conn) {
     var intercept=true;
     var remote;
     var user;
-    var cache=new cachejs();
+    var cache=new cachejs.Cache(true);
     var channels=[];
+    var subscriber=new cachejs.Connection();
     conn.on('data', function(message) {
       if(message[0]=='h'){ // heartbeat
         conn.write("h:"+heartBeatCount);
@@ -614,7 +615,7 @@ interceptor.on('connection', function(conn) {
           channel=parseInt(heads[0]);
           switch(heads[1]){
             case "init":
-                //authenticate and select bucket
+              //authenticate and select bucket
               json=JSON.parse(data);
               if(captureTokens[json.token]){
                 user = captureTokens[json.token];
@@ -624,9 +625,9 @@ interceptor.on('connection', function(conn) {
                   channel=channels.length;
                 }
                 //send index
-                channels[channel]=new cache.bucket(user,json.name);
+                channels[channel]=new cache.addBucket(user,json.name);
                 if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-                  cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){                    
+                  channels[channel](req.query).then(function(response){                    
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:index
                       ,current:curr
@@ -666,6 +667,15 @@ interceptor.on('connection', function(conn) {
                     }
                   }
                 }
+                channelName=subscriber.subscribe(user,json.name);
+                subscriber.on(channelName,function(message){
+                  /*BROADCAST CHANGE HERE
+                    
+                    
+                    
+                    
+                    */
+                })
               } else{ //not interested, create new remote connection and pass everything through
                 remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                 intercept=false;

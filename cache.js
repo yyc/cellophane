@@ -2,11 +2,17 @@ var json_diff=require("./jsondiff-node");
 var jd= new json_diff();
 var merge=require("./merge_recursively");
 var EventEmitter=require("events").EventEmitter;
+var util=require("util");
 var redis=require("then-redis");
 
-module.exports=cache;
+module.exports={
+  Cache:Cache,
+  Bucket:Bucket,
+  Connection:Connection
+  };
 
-function cache(){
+function Cache(){
+  this.eventMessages={};
 };
 if (process.env.REDISTOGO_URL) {
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
@@ -38,17 +44,17 @@ db.scanSet=function(key){
     });
   });
 }
-cache.prototype.exit=function(){
+Cache.prototype.exit=function(){
   //close redis connection
   db.quit();
 }
-cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
+Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
   return db.hgetall(itemKey(userId,bucketName,objectId,objectVersion));
 }
-cache.prototype.objectExists=function(userId,bucketName,objectId,objectVersion){
+Cache.prototype.objectExists=function(userId,bucketName,objectId,objectVersion){
   return db.exists(itemKey(userId,bucketName,objectId,objectVersion));
 }
-cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid){
+Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid){
   var obj;
   return new Promise(function(fulfill,reject){
     db.multi();
@@ -121,7 +127,7 @@ cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
     }
   });
 }
-cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
+Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
   return new Promise(function(fulfill,reject){
     //assumes that the object already exists, since the Exists call should've been run as middleware
     if(ccid){//if ccid is set, it's a simperium API call
@@ -161,7 +167,7 @@ cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
     }
   });
 }
-cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
+Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
   return new Promise(function(fulfill,reject){
     twinArray=[];
     if(overwrite){
@@ -203,7 +209,7 @@ cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
     });
   });
 }
-cache.prototype.getIndex=function(userId,bucketName,options){
+Cache.prototype.getIndex=function(userId,bucketName,options){
   return new Promise(function(fulfill,reject){
     var mark=options.mark || 0;
     var limit=options.limit || 100;
@@ -261,35 +267,56 @@ cache.prototype.getIndex=function(userId,bucketName,options){
     });
   });
 }
-
-cache.prototype.bucket=function(uid,bucket){
-  var userId=uid;
-  var bucketName=bucket;
-  var bucket=this;
-  EventEmitter.call(this);
+Cache.prototype.addBucket=function(userId,bucketName){
   console.log(this);
-  db.subscribe(userId+"-"+bucketName);
-  db.on("message",function(channel,message){
-    if(channel==userId+"-"+bucketName){
-      bucket.emit("message",message);
-    }
+  return new Bucket(userId,bucketName,this);
+}
+
+function Bucket(uid,bucket,cache){
+  this.userId=uid;
+  this.bucketName=bucket;
+  console.log(this);
+  this.cache=cache;
+}
+Bucket.prototype.objectGet=function(objectId,objectVersion){
+  return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion);
+}
+Bucket.prototype.objectSet=function(objectId,data,options,ccid){
+  return this.cache.objectSet(this.userId,this.bucketName,objectId,data,options,ccid);
+}
+Bucket.prototype.objectDelete=function(objectId,objectVersion,ccid){
+  return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion,ccid);
+}
+Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
+  return this.cache.cacheIndex(this.userId,this.bucketName,bucketIndex,overwrite);
+}
+Bucket.prototype.getIndex=function(options){
+  return this.cache.getIndex(this.userId,this.bucketName,bucketIndex,overwrite);
+}
+
+function Connection(){//Each connections should have its own individual subscription
+  EventEmitter.call(this);
+  console.log(this.eventMessages);
+  if (process.env.REDISTOGO_URL) {
+    var rtg   = require("url").parse(process.env.REDISTOGO_URL);
+    this.rd = redis.createClient(rtg.port, rtg.hostname);
+    db.auth(rtg.auth.split(":")[1]);
+  } else {
+    this.rd=redis.createClient();
+  }
+  this.rd.on("message",function(channel,message){
+    console.log(message);
+    this.emit(channel,message);
   });
 }
-cache.prototype.bucket.prototype.objectGet=function(objectId,objectVersion){
-  return objectGet(this.userId,this.bucketName,objectId,objectVersion);
+util.inherits(Connection,EventEmitter);
+Connection.prototype.subscribe=function(userId,bucketName,eventMessage){
+  this.rd.subscribe(channelKey(userId,bucketName)).then(function(res){channelKey(userId,bucketName)});
 }
-cache.prototype.bucket.prototype.objectSet=function(objectId,data,options,ccid){
-  return objectSet(this.userId,this.bucketName,objectId,data,options,ccid);
+Connection.prototype.exit=function(){
+  this.rd.quit();
 }
-cache.prototype.bucket.prototype.objectDelete=function(objectId,objectVersion,ccid){
-  return objectGet(this.userId,this.bucketName,objectId,objectVersion,ccid);
-}
-cache.prototype.bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
-  return cacheIndex(this.userId,this.bucketName,bucketIndex,overwrite);
-}
-cache.prototype.bucket.prototype.getIndex=function(options){
-  return getIndex(this.userId,this.bucketName,bucketIndex,overwrite);
-}
+
 function itemKey(userId,bucketName,itemId,objectVersion){
   if(objectVersion){
     return userId+"-"+bucketName+"-"+itemId+"~"+objectVersion;
@@ -308,6 +335,9 @@ function ccidKey(userId,bucketName,ccid){
 }
 function currentKey(userId,bucketName){
     return userId+"-"+bucketName+"~current";
+}
+function channelKey(userId,bucketName){
+  return userId+"-"+bucketName;
 }
 function parseArray(array){
   hash={};
