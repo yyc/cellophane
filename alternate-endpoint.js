@@ -259,7 +259,7 @@ var readJsonBody=function(req,res,next){
 }
 var objectPost=function(req,res,next){
   if(!req.json.ccid){
-    ccid=uuid.v4()
+    ccid=uuid.v4();
   } else{
     ccid=req.json.ccid;
   }
@@ -289,23 +289,26 @@ var objectPost=function(req,res,next){
   });
 }
 var objectDel=function(req,res,next){
-  db.multi();
-  db.del(itemKey(req.user.userId,req.params.bucket,req.params.object_id));
-  db.hincrby(versionsKey(req.user.userId,req.params.bucket),req.params.object_id,1);
-  db.exec().then(function(response){
-    if(response!=null){
-      res.setHeader("X-Simperium-Version",response[1]);
-      res.statusCode=200;
+  if(!req.query.ccid){
+    ccid=uuid.v4();
+  } else{
+    ccid=req.query.ccid;
+  }
+  cache.objectDelete(req.user,req.params.bucket,req.params.object_id,req.params.version,ccid).then(function(response){
+    console.log(response);
+    if(response[1]==200||response[1]==412){
+      res.setHeader("X-Simperium-Version",response[0]);
+      res.statusCode=response[1];
       res.end();
     }
     else{
-      res.statusCode=500;
+      res.statusCode=response[1];
       res.statusMessage="Redis storage error";
+      res.end();
     }
   })
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
-  console.log(simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount);
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(index,curr,mark){
       res.statusCode=200;

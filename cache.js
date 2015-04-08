@@ -82,6 +82,7 @@ module.exports=function(){
             changeLog=(options||{});
             changeLog.d=data;
             changeLog.id=objectId;
+            changeLog.v=response[1];
             db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
             db.set(ccidKey(ccid),JSON.stringify(changeLog));
             //if version is set, check that it is the same or greater than the one currently stored
@@ -97,7 +98,6 @@ module.exports=function(){
             db.hmset(itemKey(userId,bucketName,objectId,response[1]*1+1),obj);
             db.hincrby(versionsKey(userId,bucketName),objectId,1);
             db.exec().then(function(response2){
-              console.log(response2);
               if(response2!=null){
                 fulfill([true,response[1]*1+1,obj]);
               } else{
@@ -110,6 +110,46 @@ module.exports=function(){
         })
       } else{
         //no ccid, just cache the object and update versions
+      }
+    });
+  }
+  mod.objectDelete=function(userId,bucketName,objectId,version,ccid){
+    return new Promise(function(fulfill,reject){
+      //assumes that the object already exists, since the Exists call should've been run as middleware
+      if(ccid){//if ccid is set, it's a simperium API call
+        db.multi();
+        //check if change has been submitted before. ccid=client change id
+        db.zscore(ccidsKey(userId,bucketName),ccid);
+        //check for version numbers to determine whether I should overwrite
+        db.hget(versionsKey(userId,bucketName),objectId);
+        db.exec().then(function(response){
+          if(response[0]){//change already made
+            fulfill([response[1],412]);
+          } else if(version&&version!=response[1]){//have to check versions, DELETE only goes through if the version number matches the current one
+              fulfill([response[1],412]);
+          }
+          else{
+            changeLog={delete:true,v:response[1]};
+            db.multi();
+            db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+            db.set(ccidKey(ccid),JSON.stringify(changeLog));
+            db.del(itemKey(userId,bucketName,objectId));
+            db.hincrby(versionsKey(userId,bucketName),objectId,1);
+            db.exec().then(function(response2){
+              console.log(response2);
+              fulfill([response2[3],200])
+            });
+          }
+        });
+      }
+      else{
+        //ccid not set, delete without logging
+        db.multi();
+        db.del(itemKey(userId,bucketName,objectId));
+        db.hincrby(versionsKey(userId,bucketName),objectId,1);
+        db.exec().then(function(response2){
+          fulfill([response2[3],200])
+        });
       }
     });
   }
