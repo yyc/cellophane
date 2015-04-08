@@ -193,7 +193,7 @@ var objectAll=function(req,res,next){
   }
 }
 var objectGet=function(req,res,next){
-  cache.getObject(req.user.userId,req.params.bucket,req.params.object_id,req.params.version)
+  cache.objectGet(req.user.userId,req.params.bucket,req.params.object_id,req.params.version)
   .then(function(response){
     if(response){
       res.statusCode=200;
@@ -266,19 +266,21 @@ var objectPost=function(req,res,next){
   options=req.query;
   options.replace=(options.replace=="1"||options.replace==1);
   options.version=req.params.version;
-  cache.objectSet(req.user.userId,req.params.bucket,req.params.object_id,req.body,options,ccid)
-  .then(function(success,version,response){
-    if(req.query.response){
-      res.write(JSON.stringify(parseArray(response2[hgetAllIndex])));
-    }
-    if(success){
+  cache.objectSet(req.user.userId,req.params.bucket,req.params.object_id,req.json,options,ccid)
+  .then(function(response){
+    if(response[0]){
       res.statusCode=200;
-      res.setHeader("X-Simperium-Version",version);
+      res.setHeader("X-Simperium-Version",response[1]);
     } else{
       res.statusCode=412;
       res.statusMessage="Not Modified";
     }
-    res.end();
+    if(req.query.response){
+      res.end(JSON.stringify(response[2]));
+    }
+    else{
+      res.end();
+    }
   },function(error){
     log(error);
     res.statusCode=500;
@@ -303,6 +305,7 @@ var objectDel=function(req,res,next){
   })
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
+  console.log(simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount);
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(index,curr,mark){
       res.statusCode=200;
@@ -347,7 +350,6 @@ app.route("/1/:appName/:bucket/i/:object_id/v/:version").all(apiAll).all(objectA
 //Admin routes
 app.route("/admin/test").all(function(req,res,next){
   testData(req.query.ds).then(function(user){
-    console.log(req.query.ds);
     res.end(JSON.stringify(user));
   });
 });
@@ -973,31 +975,16 @@ function cacheBucket(userId,bucketName,overwrite){
   return new Promise(function(fulfill,reject){
     simperium.getUserById(userId).getBucket(bucketName).getAll()
     .then(function(response){
-      return cache.cacheIndex(userId,bucketname,response,overwrite)
+      return cache.cacheIndex(userId,bucketName,response,overwrite)
+    },function(error){
+      console.log("getall error",error);
     })
-    .then(function(itemIndex){
-      simperium.getUserById(userId).getBucket(bucketName).itemCount=res.length;
+    .then(function(itemLength){
+      simperium.getUserById(userId).getBucket(bucketName).itemCount=itemLength;
       fulfill();
     },function(error){
-      reject();
-    });
-  });
-}
-function purgeBucket(userId,bucketName){
-  return new Promise(function(fulfill,reject){
-    db.hkeys(versionsKey(userId,bucketName)).then(function(keys){
-      if(keys.length){
-        db.del(keys).then(function(){
-          log("Deleted all values in bucket",bucketName);
-          fulfill();
-        },function(error){
-          reject(error)
-        });
-      }
-      else{
-        log(bucketName+" was empty, fulfilled automatically");
-        fulfill();
-      }
+      log("cacheIndex error",error);
+      reject(error);
     });
   });
 }

@@ -166,21 +166,18 @@ Bucket.prototype.index=function(options){
 }
 Bucket.prototype.getAll=function(){
   bucket=this;
-  promise=bucket.requestAllJson({
+  console.log(bucket);
+  return bucket.requestAllJson({
     url:"https://api.simperium.com"+bucket.bucketPath+"index"
     , qs: {
       data:true
     }
     , method: "GET"
     , headers: {"x-simperium-token":bucket.accessToken}
+  }).then(function(res){
+    bucket.itemCount=res.index.length;
+    return Promise.resolve(res);
   });
-  promise.then(function(res){
-    return new Promise(function(fulfill,reject){
-      bucket.itemCount=res.index.length;
-      fulfill(res);
-    });
-  });
-  return promise;
   
 }
 Bucket.prototype.itemRequest=function(itemId,method,version){

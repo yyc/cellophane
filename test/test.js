@@ -56,7 +56,7 @@ describe("Ditto Checks",function(){
       .get({
         uri: localHost+"/admin/test"
         , json: true
-        , qs: {ds:false}//downsync?
+        , qs: {ds:true}//downsync?
       })
       .then(function(user){
         expect(user).to.be.a("object");

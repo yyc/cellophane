@@ -58,49 +58,58 @@ module.exports=function(){
             }else{
               fulfill(false,response[1]);
             }
-          }
-          db.multi();
-          if(options.replace){
-            obj={};
-          }
-          else{
-            obj=response[2];
-          }
-          if(!options.version){
-            //If version is not set then the latest version is updated
-            options.version=response[1];
-          }
-          changeLog=(options||{});
-          changeLog.d=data;
-          changeLog.id=objectId;
-          db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-          db.set(ccidKey(ccid),JSON.stringify(changeLog));
-          //if version is set, check that it is the same or greater than the one currently stored
-          if(options.diffObj){
-            //apply jsondiff merge
-            obj=jd.apply_object_diff(obj,data);
-          }
-          else{
-            //do a regular recursive merge
-            merge(obj,data);
-          }
-          db.hmset(itemKey(userId,bucketName,objectId),obj);
-          db.hmset(itemKey(userId,bucketName,objectId,response[1]*1+1),obj);
-          db.hincrby(versionsKey(userId,bucketName),objectId,1);
-          db.exec().then(function(response2){
-            if(response2!=null){
-              if(req.query.response){
-                fulfill(true,response[1]*1+1,false);
-              } else{
-                fulfill(true,response[1]*1+1);
-              }
-            } else{
-              reject("redis error");
+            if(!response[0]){
+              //record change anyway
+              changeLog=(options||{});
+              changeLog.d=data;
+              changeLog.id=objectId;
+              db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+              db.hmset(ccidKey(ccid),JSON.stringify(changeLog));
             }
-          },function(error){
-            reject(error);
-          }); 
+          }
+          else{
+            db.multi();
+            if(options.replace){
+              obj={};
+            }
+            else{
+              obj=response[2];
+            }
+            if(!options.version){
+              //If version is not set then the latest version is updated
+              options.version=response[1];
+            }
+            changeLog=(options||{});
+            changeLog.d=data;
+            changeLog.id=objectId;
+            db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+            db.set(ccidKey(ccid),JSON.stringify(changeLog));
+            //if version is set, check that it is the same or greater than the one currently stored
+            if(options.diffObj){
+              //apply jsondiff merge
+              obj=jd.apply_object_diff(obj,data);
+            }
+            else{
+              //do a regular recursive merge
+              merge(obj,data);
+            }
+            db.hmset(itemKey(userId,bucketName,objectId),obj);
+            db.hmset(itemKey(userId,bucketName,objectId,response[1]*1+1),obj);
+            db.hincrby(versionsKey(userId,bucketName),objectId,1);
+            db.exec().then(function(response2){
+              console.log(response2);
+              if(response2!=null){
+                fulfill([true,response[1]*1+1,obj]);
+              } else{
+                reject("redis error");
+              }
+            },function(error){
+              reject(error);
+            });
+          }
         })
+      } else{
+        //no ccid, just cache the object and update versions
       }
     });
   }
@@ -134,15 +143,15 @@ module.exports=function(){
             fulfill(res.length);
           },function(error){
             console.log("Problem with caching"+error);
-            reject(error);
+            reject("Problem with caching");
           });
         } else{
           console.log(bucketName+" is empty, nothing cached.");
           fulfill(0);
         }
       },function(error){
-        log("Problem with purging or getAll",error);
-        reject(error);
+        console.log("Problem with purging",error);
+        reject("Problem with purging");
       });
     });
   }
@@ -160,11 +169,11 @@ module.exports=function(){
         }
         return new Promise(function(fulfill,reject){
           var index=[];
-          if(req.query.data=="true"){
+          if(options.data=="true"||options.data==1){
             if(Object.keys(keys[1]).length){
               keyArray=Object.keys(keys[1]);
               db.mget(keyArray.map(function(key){
-                return itemKey(req.user.userId,req.params.bucket,key)
+                return itemKey(userId,bucketName,key);
               })).then(function(objArray){
               for(i=0;i<keyArray.length;i++){
                   index.push({
@@ -175,7 +184,7 @@ module.exports=function(){
                 }
                 fulfill(index);
               },function(error){
-                log("Error retrieving objects")
+                console.log("Error retrieving objects")
                 reject(error);
               });
             } else{
@@ -193,15 +202,13 @@ module.exports=function(){
           }
         });
       },function(error){
-          log("hgetall failed "+error);
           reject(error);
       })
       .then(function(index,mark){
-        db.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
+        db.get(currentKey(userId,bucketName)).then(function(curr){
           fulfill(index,curr,mark);
         });
       },function(error){
-        log(error);
         reject(error);
       });
     });
@@ -246,5 +253,23 @@ module.exports=function(){
       hash[array[i]]=isNaN(val)?array[i+1]:val;
     }
     return hash;
+  }
+  function purgeBucket(userId,bucketName){
+    return new Promise(function(fulfill,reject){
+      db.hkeys(versionsKey(userId,bucketName)).then(function(keys){
+        if(keys.length){
+          db.del(keys).then(function(){
+            console.log("Deleted all values in bucket",bucketName);
+            fulfill();
+          },function(error){
+            reject(error)
+          });
+        }
+        else{
+          console.log(bucketName+" was empty, fulfilled automatically");
+          fulfill();
+        }
+      });
+    });
   }
 }
