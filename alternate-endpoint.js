@@ -18,7 +18,8 @@ module.exports={
 
 //Load internal utilities
 var simperium=require("./simperium");
-var cache=require("./cache")();
+var cachejs=require("./cache");
+cache=new cachejs();
 var merge=require("./merge_recursively");
 
 //Load default configurations
@@ -310,12 +311,13 @@ var objectDel=function(req,res,next){
 }
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
-    cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(index,curr,mark){
+    cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){
+      
       res.statusCode=200;
       res.end(JSON.stringify({
-        index:index
-        ,current:curr
-        ,mark:mark
+        index:response[0]
+        ,current:response[1]
+        ,mark:response[2]
       }));
     },function(error){
       res.statusCode=500;
@@ -329,7 +331,21 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
       res.end(JSON.stringify(response));
     //Store everything in the cache
       if(options.data){
-        cache.cacheIndex(req.user.userId,req.params.bucket,response.index,false);
+        cache.cacheIndex(req.user.userId,req.params.bucket,response.index,false).then(function(indexCount){
+          oldCount=parseInt(simperium.getUserById(user).getBucket(json.name).itemCount)||0;
+          if(!response.mark){
+            console.log("Cache complete, stored "+indexCount+" items");
+            simperium.getUserById(user).getBucket(json.name).itemCount=oldCount+indexCount;
+          }
+          else{
+            console.log("Cache incomplete, stored "+indexCount+" items");
+            simperium.getUserById(user).getBucket(json.name).itemCount=""+(oldCount+indexCount);
+          }
+          conn.write(channel+':'+'i:'+data);
+        },function(error){
+          log("Unsucessfully cached elements in "+channels[channel].bucketName+":  Error "+error);
+          conn.write(channel+':'+'i:'+data);
+        });
       }
     },function(err){
       log(err);
@@ -578,17 +594,11 @@ io.on('connection',function(socket){
 //SocketJS to handle WebSocket API calls
 var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
 interceptor.on('connection', function(conn) {
-    if (process.env.REDISTOGO_URL) {
-      var rtg   = require("url").parse(process.env.REDISTOGO_URL);
-      var rd = redis.createClient(rtg.port, rtg.hostname);
-      rb.auth(rtg.auth.split(":")[1]);
-    } else {
-      var rd=redis.createClient();
-    }
     var heartBeatCount=0;
     var intercept=true;
     var remote;
     var user;
+    var cache=new cachejs();
     var channels=[];
     conn.on('data', function(message) {
       if(message[0]=='h'){ // heartbeat
@@ -614,52 +624,14 @@ interceptor.on('connection', function(conn) {
                   channel=channels.length;
                 }
                 //send index
-                channels[channel]=simperium.getUserById(user).getBucket(json.name);
-                if(typeof channels[channel].itemCount=="number"){
-                  rd.hscan(versionsKey(user,channels[channel].bucketName),0,{"count":100})
-                  .then(function(keys){
-                    if(keys[0]){
-                      mark=keys[0];
-                    }
-                    else{
-                      mark=undefined;
-                    }
-                    return new Promise(function(fulfill,reject){
-                      if(Object.keys(keys[1]).length){
-                        keyArray=Object.keys(keys[1]);
-                        rd.multi();
-                        keyArray.forEach(function(key){
-                          rd.hgetall(itemKey(user,channels[channel].bucketName,key));
-                          return key;
-                        });
-                        rd.exec().then(function(objArray){
-                          var index=[];
-                          keyArray.forEach(function(key,i){
-                            index.push({
-                              id: key
-                              , d: parseArray(objArray[i])
-                              , v: parseInt(keys[1][key])
-                            });
-                          });
-                          fulfill(index,mark);
-                        },function(error){
-                          reject("Error retrieving objects");
-                        });
-                      } else{
-                      fulfill(index,mark);
-                      }
-                    });
-                  },function(error){
-                      log("hgetall failed "+error);
-                  })
-                  .then(function(index,mark){
-                    rd.get(currentKey(user,channels[channel].bucketName)).then(function(curr){
-                      conn.write(channel+':'+'i:'+JSON.stringify({
-                        index:index
-                        ,current:curr
-                        ,mark:mark
-                        }));
-                    })
+                channels[channel]=new cache.bucket(user,json.name);
+                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
+                  cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){                    
+                    conn.write(channel+':'+'i:'+JSON.stringify({
+                      index:index
+                      ,current:curr
+                      ,mark:mark
+                    }));
                   },function(error){
                     log(error);
                   });
@@ -676,34 +648,21 @@ interceptor.on('connection', function(conn) {
                       data=msg.data.slice(hd[0].length+hd[1].length+2);
                       //cache data
                       response=JSON.parse(data);
-                      versionHash={};
-                      rd.multi();
-                      response.index.forEach(function(data){
-                        versionHash[data.id]=data.v;
-                        if(Object.keys(data.d).length){
-                          rd.hmset(itemKey(user,channels[channel].bucketName,data.id),data.d);
-                        } else{
-                          console.log("Skipping over "+itemKey(user,channels[channel].bucketName,data.id)+" because it's an empty object");
-                        }
-                      });
-                      if(Object.keys(versionHash).length){
-                        rd.hmset(versionsKey(user,channels[channel].bucketName),versionHash);
+                      channels[channel].cacheIndex(response.index,false).then(function(indexCount){
+                      oldCount=parseInt(simperium.getUserById(user).getBucket(json.name).itemCount)||0;
+                      if(!response.mark){
+                        console.log("Cache complete, stored "+indexCount+" items");
+                        simperium.getUserById(user).getBucket(json.name).itemCount=oldCount+indexCount;
                       }
-                      rd.exec().then(function(){
-                        channels[channel].itemCount=JSON.stringify((parseInt(channels[channel].itemCount)||0)+Object.keys(versionHash).length);
-                        log("Successfully cached "+Object.keys(versionHash).length+" items in "+channels[channel].bucketName);
-                        rd.hlen(versionsKey(user,channels[channel].bucketName)).then(function(len){
-                          console.log(len);
-                        });
-                        if(!response.mark){
-                          console.log("Cache complete, stored "+channels[channel].itemCount+" items");
-                          channels[channel].itemCount=(parseInt(channels[channel].itemCount));
-                        }
-                        conn.write(channel+':'+'i:'+data);
+                      else{
+                        console.log("Cache incomplete, stored "+indexCount+" items");
+                        simperium.getUserById(user).getBucket(json.name).itemCount=""+(oldCount+indexCount);
+                      }
+                      conn.write(channel+':'+'i:'+data);
                       },function(error){
-                        log("Unsucessfully cached elements in "+channels[channel].bucketName+":  Error "+error);
-                        conn.write(channel+':'+'i:'+data);
-                      });
+                       log("Unsucessfully cached elements in "+channels[channel].bucketName+":  Error "+error);
+                       conn.write(channel+':'+'i:'+data);
+                    });
                     }
                   }
                 }
@@ -809,7 +768,7 @@ interceptor.on('connection', function(conn) {
       }
     });
     conn.on('close', function() {
-      rd.quit();
+      cache.exit();
     });
 });
 var proxy = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
@@ -1025,4 +984,7 @@ function parseArray(array){
     hash[array[i]]=isNaN(val)?array[i+1]:val;
   }
   return hash;
+}
+function typeOf(input) {
+	return ({}).toString.call(input).slice(8, -1).toLowerCase();
 }
