@@ -75,10 +75,11 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           if(!response[0]){
             //record change anyway
             changeLog=(options||{});
+            changeLog.c=true;//conflict
             changeLog.d=data;
             changeLog.id=objectId;
             db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-            db.hmset(ccidKey(ccid),JSON.stringify(changeLog));
+            db.set(ccidKey(ccid),JSON.stringify(changeLog));
           }
         }
         else{
@@ -95,6 +96,7 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           }
           changeLog=(options||{});
           changeLog.d=data;
+          changeLog.c=false; //no conflicts
           changeLog.id=objectId;
           changeLog.v=response[1];
           db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
@@ -330,7 +332,7 @@ function versionsKey(userId,bucketName){
 function ccidsKey(userId,bucketName){
     return userId+"-"+bucketName+"~ccids";
 }
-function ccidKey(userId,bucketName,ccid){
+function ccidKey(ccid){
   return "ccid~"+ccid;
 }
 function currentKey(userId,bucketName){

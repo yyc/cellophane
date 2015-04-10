@@ -295,7 +295,7 @@ var objectDel=function(req,res,next){
   } else{
     ccid=req.query.ccid;
   }
-  cache.objectDelete(req.user,req.params.bucket,req.params.object_id,req.params.version,ccid).then(function(response){
+  cache.objectDelete(req.user.userId,req.params.bucket,req.params.object_id,req.params.version,ccid).then(function(response){
     console.log(response);
     if(response[1]==200||response[1]==412){
       res.setHeader("X-Simperium-Version",response[0]);
