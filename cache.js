@@ -4,6 +4,7 @@ var merge=require("./merge_recursively");
 var EventEmitter=require("events").EventEmitter;
 var util=require("util");
 var redis=require("then-redis");
+var md5=require("MD5");
 
 module.exports={
   Cache:Cache,
@@ -13,6 +14,7 @@ module.exports={
 
 function Cache(){
   this.eventMessages={};
+  this.db=redis.createClient();
 };
 if (process.env.REDISTOGO_URL) {
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
@@ -49,7 +51,9 @@ Cache.prototype.exit=function(){
   db.quit();
 }
 Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
-  return db.hgetall(itemKey(userId,bucketName,objectId,objectVersion));
+  return db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
+    return Promise.resolve(JSON.parse(response));
+  });
 }
 Cache.prototype.objectExists=function(userId,bucketName,objectId,objectVersion){
   return db.exists(itemKey(userId,bucketName,objectId,objectVersion));
@@ -63,12 +67,13 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
       db.zscore(ccidsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
       db.hget(versionsKey(userId,bucketName),objectId);
-      db.hgetall(itemKey(userId,bucketName,objectId));
+      db.get(itemKey(userId,bucketName,objectId));
+      db.get(currentKey(userId,bucketName));
       db.exec().then(function(response){
         if(response[0]||options.version<response[1]){
           //Change has already been made or is already outdated, fulfill with false for the success param
           if(options.response){
-            fulfill(false,response[1],parseArray(response[2]));
+            fulfill(false,response[1],JSON.parse(response[2]));
           }else{
             fulfill(false,response[1]);
           }
@@ -88,31 +93,41 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             obj={};
           }
           else{
-            obj=response[2];
+            obj=JSON.parse(response[2]);
           }
           if(!options.version){
             //If version is not set then the latest version is updated
             options.version=response[1];
           }
           changeLog=(options||{});
-          changeLog.d=data;
           changeLog.c=false; //no conflicts
           changeLog.id=objectId;
-          changeLog.v=response[1];
-          db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-          db.set(ccidKey(ccid),JSON.stringify(changeLog));
+          changeLog.sv=response[1];
+          changeLog.cv=md5(response[3]);
           //if version is set, check that it is the same or greater than the one currently stored
           if(options.diffObj){
             //apply jsondiff merge
             obj=jd.apply_object_diff(obj,data);
+            changeLog.d=data;
           }
           else{
             //do a regular recursive merge
             merge(obj,data);
+            //add changeobject to changelog
+            changeLog.d=jd.object_diff(obj,data);
           }
-          db.hmset(itemKey(userId,bucketName,objectId),obj);
-          db.hmset(itemKey(userId,bucketName,objectId,response[1]*1+1),obj);
+          db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+          db.set(ccidKey(ccid),JSON.stringify(changeLog));
+          db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
+          db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),JSON.stringify(obj));
           db.hincrby(versionsKey(userId,bucketName),objectId,1);
+          db.publish(channelKey(userId,bucketName),JSON.stringify(merge({
+            "id": objectId
+            , "o": "M"
+            , "v": changeLog.d
+            , "ev": response[1]
+            , "ccids": [ccid]
+          },changeLog)));
           db.exec().then(function(response2){
             if(response2!=null){
               fulfill([true,response[1]*1+1,obj]);
@@ -185,7 +200,7 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
         res.forEach(function(data){
           versionHash[data.id]=data.v;
           if(Object.keys(data.d).length){
-            db.hmset(itemKey(userId,bucketName,data.id),data.d);
+            db.set(itemKey(userId,bucketName,data.id),JSON.stringify(data.d));
           } else{
             console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");
           }
@@ -193,7 +208,9 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
         promiseArray=[];
         db.hmset(versionsKey(userId,bucketName),versionHash);
         db.del(ccidsKey(userId,bucketName));
-        db.set(currentKey(userId,bucketName),current);
+        if(!bucketIndex.mark){//only set currentKey if the cache is complete
+          db.set(currentKey(userId,bucketName),current);
+        }
         db.exec().then(function(){
           console.log("Successfully cached "+res.length+" items in "+bucketName);
           fulfill(res.length);
@@ -215,7 +232,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
   return new Promise(function(fulfill,reject){
     var mark=options.mark || 0;
     var limit=options.limit || 100;
-    db.hscan(versionsKey(userId,bucket),mark,{"count":limit})
+    db.hscan(versionsKey(userId,bucketName),mark,{"count":limit})
     .then(function(keys){
       if(keys[0]&&keys[0]!=0){
         mark=keys[0];
@@ -225,20 +242,22 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
       }
       return new Promise(function(fulfill,reject){
         var index=[];
-        if(options.data=="true"||options.data==1){
+        if(options.data=="true"||options.data==true||options.data==1){
           if(Object.keys(keys[1]).length){
             keyArray=Object.keys(keys[1]);
-            db.mget(keyArray.map(function(key){
-              return itemKey(userId,bucketName,key);
-            })).then(function(objArray){
+            console.log(keyArray.map(mapItemKey(userId,bucketName)));
+            db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
+              console.log(objArray);
             for(i=0;i<keyArray.length;i++){
+              if(objArray[i]&&objArray[i]!="null"){
                 index.push({
                   id: keyArray[i]
-                  , d: objArray[i]
+                  , d: JSON.parse(objArray[i])
                   , v: keys[1][keyArray[i]]
                 });
               }
-              fulfill([index]);
+            }
+            fulfill([index,mark]);
             },function(error){
               console.log("Error retrieving objects")
               reject(error);
@@ -248,11 +267,17 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
           }
         }
         else{
-          for(i=0;i<keyArray.length;i++){
-            index.push({
-                id: keyArray[i]
-                , v: keys[1][keyArray[i]]
-            });
+          if(Object.keys(keys[1]).length){
+            keyArray=Object.keys(keys[1]);
+            for(i=0;i<keyArray.length;i++){
+              index.push({
+                  id: keyArray[i]
+                  , v: keys[1][keyArray[i]]
+              });
+              fulfill([index,mark]);
+            }
+          }
+          else{
             fulfill([index,mark]);
           }
         }
@@ -271,14 +296,13 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
 }
 Cache.prototype.addBucket=function(userId,bucketName){
   console.log(this);
-  return new Bucket(userId,bucketName,this);
+  return new Bucket(userId,bucketName);
 }
 
 function Bucket(uid,bucket,cache){
   this.userId=uid;
   this.bucketName=bucket;
-  console.log(this);
-  this.cache=cache;
+  this.cache=new Cache();
 }
 Bucket.prototype.objectGet=function(objectId,objectVersion){
   return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion);
@@ -293,10 +317,10 @@ Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
   return this.cache.cacheIndex(this.userId,this.bucketName,bucketIndex,overwrite);
 }
 Bucket.prototype.getIndex=function(options){
-  return this.cache.getIndex(this.userId,this.bucketName,bucketIndex,overwrite);
+  return this.cache.getIndex(this.userId,this.bucketName,options);
 }
 
-function Connection(){//Each connections should have its own individual subscription
+function Connection(){//Each connection should have its own individual subscription
   EventEmitter.call(this);
   console.log(this.eventMessages);
   if (process.env.REDISTOGO_URL) {
@@ -312,8 +336,11 @@ function Connection(){//Each connections should have its own individual subscrip
   });
 }
 util.inherits(Connection,EventEmitter);
-Connection.prototype.subscribe=function(userId,bucketName,eventMessage){
-  this.rd.subscribe(channelKey(userId,bucketName)).then(function(res){channelKey(userId,bucketName)});
+Connection.prototype.subscribe=function(userId,bucketName){
+  this.rd.subscribe(channelKey(userId,bucketName)).then(function(response){
+    console.log("Subscription to "+response);
+  });
+  return channelKey(userId,bucketName);
 }
 Connection.prototype.exit=function(){
   this.rd.quit();
@@ -324,6 +351,11 @@ function itemKey(userId,bucketName,itemId,objectVersion){
     return userId+"-"+bucketName+"-"+itemId+"~"+objectVersion;
   } else{
     return userId+"-"+bucketName+"-"+itemId+"";
+  }
+}
+function mapItemKey(userId,bucketName){
+  return function(objectId){
+    return itemKey(userId,bucketName,objectId);
   }
 }
 function versionsKey(userId,bucketName){

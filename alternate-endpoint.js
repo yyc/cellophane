@@ -38,16 +38,11 @@ var captureTokens={};
 var activeUsers={};
 var activeApps={};
 merge(options,defaultOptions);
-
-//Setup Redis
-
 var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
 
 
+
 function start(done){
-
-
-
 //Getting all auth requests and /buckets (since they match the same route pattern
 app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   req.appName=req.params.appName;
@@ -625,16 +620,17 @@ interceptor.on('connection', function(conn) {
                   channel=channels.length;
                 }
                 //send index
-                channels[channel]=new cache.addBucket(user,json.name);
+                channels[channel]=cache.addBucket(user,json.name);
                 if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-                  channels[channel](req.query).then(function(response){                    
+//                if(true){
+                  channels[channel].getIndex({limit:100,data:true}).then(function(response){
                     conn.write(channel+':'+'i:'+JSON.stringify({
-                      index:index
-                      ,current:curr
-                      ,mark:mark
+                      index:response[0]
+                      ,current:response[1]
+                      ,mark:response[2]
                     }));
                   },function(error){
-                    log(error);
+                    console.log("index error",error);
                   });
                 }else{
                   remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
@@ -669,12 +665,8 @@ interceptor.on('connection', function(conn) {
                 }
                 channelName=subscriber.subscribe(user,json.name);
                 subscriber.on(channelName,function(message){
-                  /*BROADCAST CHANGE HERE
-                    
-                    
-                    
-                    
-                    */
+                  console.log(channelName,message);
+                  
                 })
               } else{ //not interested, create new remote connection and pass everything through
                 remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
@@ -751,27 +743,7 @@ interceptor.on('connection', function(conn) {
               //Change object
               json=JSON.parse(data);
               console.log(json);
-              rd.hget(versionsKey(user,channels[channel].bucketName))
-              .then(function(res){
-                if(res!=null){
-                  if(json.sv>parseInt(res)){
-                    return rd.hgetall(itemKey(user,channels[channel].bucketName,json.id));
-                  }
-                }
-                else{
-                  //create new object
-                  rd.multi();
-                  rd.hincrby(versionsKey(user,channels[channel].bucketName),1);
-                  object=jd.apply_object_diff({},json.v);
-                }
-              },function(error){
-                return Promise.reject(error);
-              }).then(function(obj){
-                
-              },function(reject){
-                
-              });
-              
+              channels[channel]
             break;
           }
         }
@@ -947,6 +919,7 @@ function cacheBucket(userId,bucketName,overwrite){
   return new Promise(function(fulfill,reject){
     simperium.getUserById(userId).getBucket(bucketName).getAll()
     .then(function(response){
+      response.mark=undefined;
       return cache.cacheIndex(userId,bucketName,response,overwrite)
     },function(error){
       console.log("getall error",error);
