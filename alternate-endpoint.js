@@ -623,13 +623,16 @@ interceptor.on('connection', function(conn) {
 //                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
                 if(true){
                   channels[channel].getIndex({limit:100,data:true}).then(function(response){
+                    console.log(11,response);
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
                       ,current:response[1]
                       ,mark:response[2]
                     }));
+                    return Promise.resolve(index);
                   },function(error){
                     console.log("index error",error);
+                    return Promise.reject(error);
                 });
                 }else{
                   remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
@@ -664,7 +667,8 @@ interceptor.on('connection', function(conn) {
                 }
                 channelName=subscriber.subscribe(user,json.name);
                 subscriber.on(channelName,function(message){
-                  console.log(channelName,message);
+                  console.log("websocket",channelName,message);
+                  conn.write(message);
                   
                 })
               } else{ //not interested, create new remote connection and pass everything through
@@ -750,6 +754,7 @@ interceptor.on('connection', function(conn) {
     });
     conn.on('close', function() {
       cache.exit();
+      subscriber.exit();
     });
 });
 var proxy = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
