@@ -593,7 +593,6 @@ interceptor.on('connection', function(conn) {
     var intercept=true;
     var remote;
     var user;
-    var cache=new cachejs.Cache(true);
     var channels=[];
     var subscriber=new cachejs.Connection();
     conn.on('data', function(message) {
@@ -621,8 +620,8 @@ interceptor.on('connection', function(conn) {
                 }
                 //send index
                 channels[channel]=cache.addBucket(user,json.name);
-                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-//                if(true){
+//                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
+                if(true){
                   channels[channel].getIndex({limit:100,data:true}).then(function(response){
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
@@ -631,7 +630,7 @@ interceptor.on('connection', function(conn) {
                     }));
                   },function(error){
                     console.log("index error",error);
-                  });
+                });
                 }else{
                   remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                   intercept=false;

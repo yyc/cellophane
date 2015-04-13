@@ -245,9 +245,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
         if(options.data=="true"||options.data==true||options.data==1){
           if(Object.keys(keys[1]).length){
             keyArray=Object.keys(keys[1]);
-            console.log(keyArray.map(mapItemKey(userId,bucketName)));
             db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
-              console.log(objArray);
             for(i=0;i<keyArray.length;i++){
               if(objArray[i]&&objArray[i]!="null"){
                 index.push({
@@ -295,7 +293,6 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
   });
 }
 Cache.prototype.addBucket=function(userId,bucketName){
-  console.log(this);
   return new Bucket(userId,bucketName);
 }
 
@@ -322,7 +319,6 @@ Bucket.prototype.getIndex=function(options){
 
 function Connection(){//Each connection should have its own individual subscription
   EventEmitter.call(this);
-  console.log(this.eventMessages);
   if (process.env.REDISTOGO_URL) {
     var rtg   = require("url").parse(process.env.REDISTOGO_URL);
     this.rd = redis.createClient(rtg.port, rtg.hostname);
