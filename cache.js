@@ -94,6 +94,9 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           }
           else{
             obj=JSON.parse(response[2]);
+            if(!obj){
+              obj={};
+            }
           }
           if(!options.version){
             //If version is not set then the latest version is updated
@@ -229,14 +232,11 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
   });
 }
 Cache.prototype.getIndex=function(userId,bucketName,options){
-  console.log(2);
   self=this;
   return new Promise(function(fulfill,reject){
     var mark=options.mark || 0;
     var limit=options.limit || 100;
-    console.log(3,userId,bucketName,mark,limit);
     self.db.send("hscan",[versionsKey(userId,bucketName),mark]).then(function(keys){
-      console.log(4,"WHYWHYWHY");
       if(keys[0]&&keys[0]!=0){
         mark=keys[0];
       }
@@ -245,12 +245,9 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
       }
       keys[1]=parseArray(keys[1]);
       return new Promise(function(resolve,reject){
-        console.log(5)
         var index=[];
         if(options.data=="true"||options.data==true||options.data==1){
-          console.log(6);
           if(Object.keys(keys[1]).length){
-            console.log(7)
             keyArray=Object.keys(keys[1]);
             self.db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
             for(i=0;i<keyArray.length;i++){
@@ -262,7 +259,6 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
                 });
               }
             }
-            console.log(8);
             resolve([index,mark]);
             },function(error){
               console.log("Error retrieving objects")
@@ -293,9 +289,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
         return Promise.reject(error);
     })
     .then(function(res){
-      console.log(9);
       self.db.get(currentKey(userId,bucketName)).then(function(curr){
-        console.log(10);
         fulfill([res[0],curr,res[1]]);
       });
     },function(error){
@@ -322,7 +316,7 @@ Bucket.prototype.objectDelete=function(objectId,objectVersion,ccid){
   return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion,ccid);
 }
 Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
-  console.log(1);
+  ;
   return this.cache.cacheIndex(this.userId,this.bucketName,bucketIndex,overwrite);
 }
 Bucket.prototype.getIndex=function(options){
@@ -341,7 +335,7 @@ function Connection(){//Each connection should have its own individual subscript
   }
   this.rd.on("message",function(channel,message){
     console.log("cache",channel,message);
-    self.emit(channel,message);
+    this.emit(channel,channel,message);
   });
 }
 util.inherits(Connection,EventEmitter);

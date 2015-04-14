@@ -307,6 +307,7 @@ var objectDel=function(req,res,next){
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){
+      
       res.statusCode=200;
       res.end(JSON.stringify({
         index:response[0]
@@ -593,6 +594,7 @@ interceptor.on('connection', function(conn) {
     var remote;
     var user;
     var channels=[];
+    var channel2index={};
     var subscriber=new cachejs.Connection();
     conn.on('data', function(message) {
       if(message[0]=='h'){ // heartbeat
@@ -632,7 +634,7 @@ interceptor.on('connection', function(conn) {
                   },function(error){
                     console.log("index error",error);
                     return Promise.reject(error);
-                });
+                  });
                 }else{
                   remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                   intercept=false;
@@ -665,11 +667,11 @@ interceptor.on('connection', function(conn) {
                   }
                 }
                 channelName=subscriber.subscribe(user,json.name);
-                subscriber.on(channelName,function(message){
+                subscriber.rd.on(channelName,function(channelName,message){
                   console.log("websocket",channelName,message);
-                  conn.write(message);
-                  
-                })
+                  conn.write(channel2index[channelName]+":c:"+message);
+                });
+                channel2index[channelName]=channel;
               } else{ //not interested, create new remote connection and pass everything through
                 remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                 intercept=false;
@@ -745,7 +747,7 @@ interceptor.on('connection', function(conn) {
               //Change object
               json=JSON.parse(data);
               console.log(json);
-              channels[channel]
+              channels[channel].objectSet(json.id,json.v,{version:json.sv,diffObj:true},json.ccid);
             break;
           }
         }

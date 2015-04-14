@@ -13,6 +13,7 @@ module.exports = function(base,extend){
       base[key]=extend[key];
     }
   }
+  return base;
 }
 
 function typeOf(input) {
