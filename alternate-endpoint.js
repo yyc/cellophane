@@ -307,7 +307,6 @@ var objectDel=function(req,res,next){
 app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
   if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
     cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){
-      
       res.statusCode=200;
       res.end(JSON.stringify({
         index:response[0]

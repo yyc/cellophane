@@ -14,7 +14,7 @@ module.exports={
 
 function Cache(){
   this.eventMessages={};
-  this.db=redis.createClient();
+  this.db=redis.createClient();  
 };
 if (process.env.REDISTOGO_URL) {
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
@@ -230,18 +230,20 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
 }
 Cache.prototype.getIndex=function(userId,bucketName,options){
   console.log(2);
+  self=this;
   return new Promise(function(fulfill,reject){
-    console.log(3,userId,bucketName,options);
     var mark=options.mark || 0;
     var limit=options.limit || 100;
-    db.hscan(versionsKey(userId,bucketName),mark,{count:limit}).then(function(keys){
-      console.log(4)
+    console.log(3,userId,bucketName,mark,limit);
+    self.db.send("hscan",[versionsKey(userId,bucketName),mark]).then(function(keys){
+      console.log(4,"WHYWHYWHY");
       if(keys[0]&&keys[0]!=0){
         mark=keys[0];
       }
       else{
         mark=undefined;
       }
+      keys[1]=parseArray(keys[1]);
       return new Promise(function(resolve,reject){
         console.log(5)
         var index=[];
@@ -250,7 +252,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
           if(Object.keys(keys[1]).length){
             console.log(7)
             keyArray=Object.keys(keys[1]);
-            db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
+            self.db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
             for(i=0;i<keyArray.length;i++){
               if(objArray[i]&&objArray[i]!="null"){
                 index.push({
@@ -288,11 +290,11 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
       });
     },function(error){
         console.log("hscan error",error);
-        reject(error);
+        return Promise.reject(error);
     })
     .then(function(res){
-      console.log(9)
-      db.get(currentKey(userId,bucketName)).then(function(curr){
+      console.log(9);
+      self.db.get(currentKey(userId,bucketName)).then(function(curr){
         console.log(10);
         fulfill([res[0],curr,res[1]]);
       });
