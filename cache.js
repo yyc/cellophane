@@ -48,34 +48,39 @@ db.scanSet=function(key){
 }
 Cache.prototype.exit=function(){
   //close redis connection
-  db.quit();
+  this.db.quit();
 }
 Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
-  return db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
+  return this.db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
     return Promise.resolve(JSON.parse(response));
   });
 }
 Cache.prototype.objectExists=function(userId,bucketName,objectId,objectVersion){
-  return db.exists(itemKey(userId,bucketName,objectId,objectVersion));
+  return this.db.exists(itemKey(userId,bucketName,objectId,objectVersion));
 }
 Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid){
   var obj;
+  self=this;
   return new Promise(function(fulfill,reject){
-    db.multi();
+    console.log(2,userId,bucketName,objectId,data,options,ccid);
+    self.db.multi();
     if(ccid){//if ccid is set, it's a simperium API call
+      console.log(3);
       //check if change has been submitted before. ccid=client change id
-      db.zscore(ccidsKey(userId,bucketName),ccid);
+      self.db.zscore(ccidsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
-      db.hget(versionsKey(userId,bucketName),objectId);
-      db.get(itemKey(userId,bucketName,objectId));
-      db.get(currentKey(userId,bucketName));
-      db.exec().then(function(response){
+      self.db.hget(versionsKey(userId,bucketName),objectId);
+      self.db.get(itemKey(userId,bucketName,objectId));
+      self.db.get(currentKey(userId,bucketName));
+      self.db.exec().then(function(response){
+        console.log(4,response);
         if(response[0]||options.version<response[1]){
           //Change has already been made or is already outdated, fulfill with false for the success param
+          console.log("5 outdated");
           if(options.response){
-            fulfill(false,response[1],JSON.parse(response[2]));
+            fulfill([false,response[1],JSON.parse(response[2])]);
           }else{
-            fulfill(false,response[1]);
+            fulfill([false,response[1]]);
           }
           if(!response[0]){
             //record change anyway
@@ -83,12 +88,14 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             changeLog.c=true;//conflict
             changeLog.d=data;
             changeLog.id=objectId;
-            db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-            db.set(ccidKey(ccid),JSON.stringify(changeLog));
+            self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+            self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
           }
         }
         else{
-          db.multi();
+          response[0]=response[0]||1;
+          console.log(5);
+          self.db.multi();
           if(options.replace){
             obj={};
           }
@@ -105,33 +112,35 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           changeLog=(options||{});
           changeLog.c=false; //no conflicts
           changeLog.id=objectId;
-          changeLog.sv=response[1];
+          changeLog.sv=parseInt(response[1]);
           changeLog.cv=md5(response[3]);
           //if version is set, check that it is the same or greater than the one currently stored
           if(options.diffObj){
             //apply jsondiff merge
             obj=jd.apply_object_diff(obj,data);
-            changeLog.d=data;
+            changeLog.v=data;
+            console.log("6 diffObj");
           }
           else{
             //do a regular recursive merge
             merge(obj,data);
             //add changeobject to changelog
-            changeLog.d=jd.object_diff(obj,data);
+            changeLog.v =jd.object_diff(obj,data);
+            console.log("6 merge");
           }
-          db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-          db.set(ccidKey(ccid),JSON.stringify(changeLog));
-          db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
-          db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),JSON.stringify(obj));
-          db.hincrby(versionsKey(userId,bucketName),objectId,1);
-          db.publish(channelKey(userId,bucketName),JSON.stringify(merge({
+          self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+          self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
+          self.db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
+          self.db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),JSON.stringify(obj));
+          self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
+          self.db.publish(channelKey(userId,bucketName),JSON.stringify([merge({
             "id": objectId
             , "o": "M"
-            , "v": changeLog.d
-            , "ev": response[1]
+            , "ev": (response[1]*1)+1
             , "ccids": [ccid]
-          },changeLog)));
-          db.exec().then(function(response2){
+          },changeLog)]));
+          self.db.exec().then(function(response2){
+            console.log(7);
             if(response2!=null){
               fulfill([true,response[1]*1+1,obj]);
             } else{
@@ -148,15 +157,16 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
   });
 }
 Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
+  self=this;
   return new Promise(function(fulfill,reject){
     //assumes that the object already exists, since the Exists call should've been run as middleware
     if(ccid){//if ccid is set, it's a simperium API call
-      db.multi();
+      self.db.multi();
       //check if change has been submitted before. ccid=client change id
-      db.zscore(ccidsKey(userId,bucketName),ccid);
+      self.db.zscore(ccidsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
-      db.hget(versionsKey(userId,bucketName),objectId);
-      db.exec().then(function(response){
+      self.db.hget(versionsKey(userId,bucketName),objectId);
+      self.db.exec().then(function(response){
         if(response[0]){//change already made
           fulfill([response[1],412]);
         } else if(version&&version!=response[1]){//have to check versions, DELETE only goes through if the version number matches the current one
@@ -164,12 +174,12 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
         }
         else{
           changeLog={delete:true,v:response[1]};
-          db.multi();
-          db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
-          db.set(ccidKey(ccid),JSON.stringify(changeLog));
-          db.del(itemKey(userId,bucketName,objectId));
-          db.hincrby(versionsKey(userId,bucketName),objectId,1);
-          db.exec().then(function(response2){
+          self.db.multi();
+          self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+          self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
+          self.db.del(itemKey(userId,bucketName,objectId));
+          self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
+          self.db.exec().then(function(response2){
             console.log(response2);
             fulfill([response2[3],200])
           });
@@ -178,16 +188,17 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
     }
     else{
       //ccid not set, delete without logging
-      db.multi();
-      db.del(itemKey(userId,bucketName,objectId));
-      db.hincrby(versionsKey(userId,bucketName),objectId,1);
-      db.exec().then(function(response2){
+      self.db.multi();
+      self.db.del(itemKey(userId,bucketName,objectId));
+      self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
+      self.db.exec().then(function(response2){
         fulfill([response2[3],200])
       });
     }
   });
 }
 Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
+  var self=this;
   return new Promise(function(fulfill,reject){
     twinArray=[];
     if(overwrite){
@@ -199,22 +210,22 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
       versionHash={};
       indexHash={};
       if(res.length){
-        db.multi();
+        self.db.multi();
         res.forEach(function(data){
           versionHash[data.id]=data.v;
           if(Object.keys(data.d).length){
-            db.set(itemKey(userId,bucketName,data.id),JSON.stringify(data.d));
+            self.db.set(itemKey(userId,bucketName,data.id),JSON.stringify(data.d));
           } else{
             console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");
           }
         });
         promiseArray=[];
-        db.hmset(versionsKey(userId,bucketName),versionHash);
-        db.del(ccidsKey(userId,bucketName));
+        self.db.hmset(versionsKey(userId,bucketName),versionHash);
+        self.db.del(ccidsKey(userId,bucketName));
         if(!bucketIndex.mark){//only set currentKey if the cache is complete
-          db.set(currentKey(userId,bucketName),current);
+          self.db.set(currentKey(userId,bucketName),current);
         }
-        db.exec().then(function(){
+        self.db.exec().then(function(){
           console.log("Successfully cached "+res.length+" items in "+bucketName);
           fulfill(res.length);
         },function(error){
@@ -329,7 +340,7 @@ function Connection(){//Each connection should have its own individual subscript
   if (process.env.REDISTOGO_URL) {
     var rtg   = require("url").parse(process.env.REDISTOGO_URL);
     this.rd = redis.createClient(rtg.port, rtg.hostname);
-    db.auth(rtg.auth.split(":")[1]);
+    this.db.auth(rtg.auth.split(":")[1]);
   } else {
     this.rd=redis.createClient();
   }

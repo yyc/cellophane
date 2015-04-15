@@ -594,6 +594,7 @@ interceptor.on('connection', function(conn) {
     var remote;
     var user;
     var channels=[];
+    var clientId;
     var channel2index={};
     var subscriber=new cachejs.Connection();
     conn.on('data', function(message) {
@@ -614,6 +615,7 @@ interceptor.on('connection', function(conn) {
               json=JSON.parse(data);
               if(captureTokens[json.token]){
                 user = captureTokens[json.token];
+                clientId=json.clientid
                 conn.write(heads[0]+":auth:"+simperium.getUserById(user).username);
                 channel=parseInt(heads[0]);
                 if(isNaN(channel)){
@@ -684,57 +686,26 @@ interceptor.on('connection', function(conn) {
               }
             break;
             case "i":
-                //post index
-              if(typeof channels[channel].itemCount=="number"){
+              //post index
+//              if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
+              if(true){
                 query=data.split(":");
                 var mark=parseInt(query[1]);
                 var limit=query[3] || 100;
-                rd.hscan(versionsKey(user,channels[channel].bucketName),mark,{"count":limit})
-                .then(function(keys){
-                  if(keys[0]){
-                    mark=keys[0];
-                  }
-                  else{
-                    mark=undefined;
-                  }
-                  return new Promise(function(fulfill,reject){
-                    var index=[];
-                    if(Object.keys(keys[1]).length){
-                      keyArray=Object.keys(keys[1]);
-                      rd.mget(keyArray.map(function(key){
-                        return itemKey(user,channels[channel].bucketName,key)
-                      })).then(function(objArray){
-                      for(i=0;i<keyArray.length;i++){
-                          index.push({
-                            id: keyArray[i]
-                            , d: objArray[i]
-                            , v: keys[1][keyArray[i]]
-                          });
-                        }
-                        fulfill(index);
-                      },function(error){
-                        log("Error retrieving objects")
-                        reject(error);
-                      });
-                    } else{
-                    fulfill(index,mark);
-                    }
-                  });
+                channels[channel].getIndex({limit:100,data:true}).then(function(response){
+                  console.log(11,response);
+                  conn.write(channel+':'+'i:'+JSON.stringify({
+                    index:response[0]
+                    ,current:response[1]
+                    ,mark:response[2]
+                  }));
+                  return Promise.resolve(index);
                 },function(error){
-                    log("hgetall failed "+error);
-                })
-                .then(function(index,mark){
-                  rd.get(currentKey(req.user.userId,req.params.bucket)).then(function(curr){
-                    conn.write(channel+':'+'i:'+JSON.stringify({
-                      index:index
-                      ,current:curr
-                      ,mark:mark
-                      }));
-                  })
-                },function(error){
-                  log(error);
+                  console.log("index error",error);
+                  return Promise.reject(error);
                 });
               }
+
               else{
                 remote.send("0:i:"+data);
               }
@@ -747,7 +718,19 @@ interceptor.on('connection', function(conn) {
               //Change object
               json=JSON.parse(data);
               console.log(json);
-              channels[channel].objectSet(json.id,json.v,{version:json.sv,diffObj:true},json.ccid);
+              console.log(1)
+              channels[channel].objectSet(json.id,json.v,{version:json.sv,diffObj:true,clientid:clientId},json.ccid)
+              .then(function(res){
+                console.log(8,res);
+                if(res[0]==false){
+                  conn.write(channel+":c:"+JSON.stringify([
+                  {ccids: [json.ccid]
+                    , clientid:clientId
+                    , id: json.id
+                    , error: 409
+                  }]));
+                }
+              });
             break;
           }
         }
