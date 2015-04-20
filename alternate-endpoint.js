@@ -384,7 +384,7 @@ app.get("/socket.io/socket.io.js",function(req,res,next){
 });
 */
 
-//Admin page, might switch over to webSockets as well and remove socket.io
+//Admin page, might switch over to sockJS as well and remove socket.io
 io.on('connection',function(socket){
   socket.on("list",function(payload){
     socket.emit("listing",activeUsers);
@@ -409,6 +409,8 @@ io.on('connection',function(socket){
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
         activeApps[appName]=1;
+        interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
+        console.log(interceptor);
         for(var key in user.buckets){
           ary.push(cacheBucket(user,key));
         }
@@ -427,14 +429,14 @@ io.on('connection',function(socket){
   socket.on("store",function(payload){
     switch(payload[0]){
       case "flush":
-        db.send("FLUSHDB").then(function(success){
+        cache.db.send("FLUSHDB").then(function(success){
           socket.emit("reply","Store successfully flushed "+success);
         },function(error){
           socket.emit("error","couldn't flush store"+error);
         });
       break;
       case "list":
-        db.keys(payload[1]).then(function(response){
+        cache.db.keys(payload[1]).then(function(response){
           socket.emit("reply","Keys follow");
           socket.emit("listing",response);
         },function(error){
@@ -442,14 +444,14 @@ io.on('connection',function(socket){
         });      
       break;
       case "get":
-        db.get(payload[1]).then(function(response){
+        cache.db.get(payload[1]).then(function(response){
           socket.emit("reply",response);
         },function(error){
           socket.emit("error","couldn't fetch. "+error);
         })
       break;
       default:
-        db.send(payload[0],payload.slice(1)).then(function(response){
+        cache.db.send(payload[0],payload.slice(1)).then(function(response){
           socket.emit("reply","Response as follows ");
           socket.emit("listing",response);
         },function(error){
@@ -466,7 +468,7 @@ io.on('connection',function(socket){
         captureTokens[accessToken]=activeUsers[username];
         socket.emit("reply","Successfully associated token "+accessToken+" with user "+username+" (userid "+activeUsers[username]+")");
       }else{
-        socket.emit("error","Username not found! Please use the add <username> <password> command first");
+                socket.emit("error","Username not found! Please use the add <username> <password> command first");
       }
     }
   });
@@ -603,18 +605,21 @@ interceptor.on('connection', function(conn) {
         heartBeatCount++;
       }
       else{
+        console.log(message);
         if(!intercept){ // don't intercept, just let it go
-          remote.send(message);
+          console.log(remote.readyState);
+//          remote.send(message);
         } else{
-          heads=message.split(':',2);
-          data=message.slice(heads[0].length+heads[1].length+2);
-          channel=parseInt(heads[0]);
+          var heads=message.split(':',2);
+          var data=message.slice(heads[0].length+heads[1].length+2);
+          var channel=parseInt(heads[0]);
           switch(heads[1]){
             case "init":
               //authenticate and select bucket
               json=JSON.parse(data);
               if(captureTokens[json.token]){
                 user = captureTokens[json.token];
+                console.log("user",user);
                 clientId=json.clientid
                 conn.write(heads[0]+":auth:"+simperium.getUserById(user).username);
                 channel=parseInt(heads[0]);
@@ -623,8 +628,8 @@ interceptor.on('connection', function(conn) {
                 }
                 //send index
                 channels[channel]=cache.addBucket(user,json.name);
-//                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-                if(true){
+                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
+                  console.log("bucket",channels[channel]);
                   channels[channel].getIndex({limit:100,data:true}).then(function(response){
                     console.log(11,response);
                     conn.write(channel+':'+'i:'+JSON.stringify({
@@ -680,15 +685,15 @@ interceptor.on('connection', function(conn) {
                 remote.onopen=function(){
                   remote.send(message);
                 }
-                remote.onmessage=function(message){
+                remote.onmessage=function(msg){
+                  console.log("remote res",msg);
                   conn.write(message.data);
                 }
               }
             break;
             case "i":
               //post index
-//              if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-              if(true){
+              if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
                 query=data.split(":");
                 var mark=parseInt(query[1]);
                 var limit=query[3] || 100;
@@ -705,9 +710,8 @@ interceptor.on('connection', function(conn) {
                   return Promise.reject(error);
                 });
               }
-
               else{
-                remote.send("0:i:"+data);
+                remote.send(message);
               }
             break;
             case "cv":

@@ -62,10 +62,8 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
   var obj;
   self=this;
   return new Promise(function(fulfill,reject){
-    console.log(2,userId,bucketName,objectId,data,options,ccid);
     self.db.multi();
     if(ccid){//if ccid is set, it's a simperium API call
-      console.log(3);
       //check if change has been submitted before. ccid=client change id
       self.db.zscore(ccidsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
@@ -73,10 +71,8 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
       self.db.get(itemKey(userId,bucketName,objectId));
       self.db.get(currentKey(userId,bucketName));
       self.db.exec().then(function(response){
-        console.log(4,response);
         if(response[0]||options.version<response[1]){
           //Change has already been made or is already outdated, fulfill with false for the success param
-          console.log("5 outdated");
           if(options.response){
             fulfill([false,response[1],JSON.parse(response[2])]);
           }else{
@@ -94,7 +90,6 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
         }
         else{
           response[0]=response[0]||1;
-          console.log(5);
           self.db.multi();
           if(options.replace){
             obj={};
@@ -119,14 +114,12 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             //apply jsondiff merge
             obj=jd.apply_object_diff(obj,data);
             changeLog.v=data;
-            console.log("6 diffObj");
           }
           else{
             //do a regular recursive merge
             merge(obj,data);
             //add changeobject to changelog
             changeLog.v =jd.object_diff(obj,data);
-            console.log("6 merge");
           }
           self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
@@ -140,7 +133,6 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             , "ccids": [ccid]
           },changeLog)]));
           self.db.exec().then(function(response2){
-            console.log(7);
             if(response2!=null){
               fulfill([true,response[1]*1+1,obj]);
             } else{
@@ -216,6 +208,7 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
           if(Object.keys(data.d).length){
             self.db.set(itemKey(userId,bucketName,data.id),JSON.stringify(data.d));
           } else{
+            console.log(data)
             console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");
           }
         });
