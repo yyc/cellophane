@@ -17,7 +17,7 @@ function Cache(){
   this.db=redis.createClient();  
 };
 if (process.env.REDISTOGO_URL) {
-  var rtg   = require("url").parse(process.env.REDISTOGO_URL);
+  var rtg = require("url").parse(process.env.REDISTOGO_URL);
   var db = redis.createClient(rtg.port, rtg.hostname);
   db.auth(rtg.auth.split(":")[1]);
 } else {
@@ -90,7 +90,6 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
         }
         else{
           response[0]=response[0]||1;
-          self.db.multi();
           if(options.replace){
             obj={};
           }
@@ -112,6 +111,7 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           //if version is set, check that it is the same or greater than the one currently stored
           if(options.diffObj){
             //apply jsondiff merge
+            console.log(obj,data);
             obj=jd.apply_object_diff(obj,data);
             changeLog.v=data;
           }
@@ -121,6 +121,7 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             //add changeobject to changelog
             changeLog.v =jd.object_diff(obj,data);
           }
+          self.db.multi();
           self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
           self.db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
@@ -252,8 +253,9 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
         var index=[];
         if(options.data=="true"||options.data==true||options.data==1){
           if(Object.keys(keys[1]).length){
-            keyArray=Object.keys(keys[1]);
+            var keyArray=Object.keys(keys[1]);
             self.db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
+            console.log("mget result",bucketName,keyArray,objArray);
             for(i=0;i<keyArray.length;i++){
               if(objArray[i]&&objArray[i]!="null"){
                 index.push({
@@ -309,6 +311,8 @@ function Bucket(uid,bucket,cache){
   this.userId=uid;
   this.bucketName=bucket;
   this.cache=new Cache();
+  this.cache.db.send("CLIENT",['SETNAME',bucket]);
+
 }
 Bucket.prototype.objectGet=function(objectId,objectVersion){
   return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion);
@@ -341,13 +345,23 @@ function Connection(){//Each connection should have its own individual subscript
     console.log("cache",channel,message);
     this.emit(channel,channel,message);
   });
+  this.subscriptionList=[];
 }
 util.inherits(Connection,EventEmitter);
 Connection.prototype.subscribe=function(userId,bucketName){
-  this.rd.subscribe(channelKey(userId,bucketName)).then(function(response){
-    console.log("Subscribed to "+response);
-  });
+  this.subscriptionList.push(channelKey(userId,bucketName));
   return channelKey(userId,bucketName);
+}
+Connection.prototype.makeSubscribe=function(){
+  if(this.subscriptionList.length){
+    this.rd.subscribe(this.subscriptionList).then(function(response){
+      console.log("Subscribed to "+this.subscriptionList);
+    });
+    this.subscriptionList=[];
+  } else{
+    console.log("Already subscribed or empty list");
+  }
+
 }
 Connection.prototype.exit=function(){
   this.rd.quit();
@@ -409,4 +423,3 @@ function purgeBucket(userId,bucketName){
 function typeOf(input) {
 	return ({}).toString.call(input).slice(8, -1).toLowerCase();
 }
-

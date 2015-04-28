@@ -92,7 +92,7 @@ User.prototype.bucketList=function(user){
     }).then(function(json){
         this.buckets={};
         for(i=0;i<json.buckets.length;i++){
-          user.getBucket(json.buckets[i].name);
+          user.getBucket(json.buckets[i].name.toLowerCase());
         }
         fulfill(json);
       },function(error){
