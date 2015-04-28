@@ -52,7 +52,13 @@ Cache.prototype.exit=function(){
 }
 Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
   return this.db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
-    return Promise.resolve(JSON.parse(response));
+    if(response==null && objectVersion){
+      return this.db.get(itemKey(userId,bucketName,objectId)).then(function(response){
+        return Promise.resolve(JSON.parse(response));        
+      });
+    } else{
+      return Promise.resolve(JSON.parse(response));
+    }
   });
 }
 Cache.prototype.objectExists=function(userId,bucketName,objectId,objectVersion){
@@ -208,6 +214,7 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
           versionHash[data.id]=data.v;
           if(Object.keys(data.d).length){
             self.db.set(itemKey(userId,bucketName,data.id),JSON.stringify(data.d));
+            self.db.set(itemKey(userId,bucketName,data.id,data.v),JSON.stringify(data.d)); 
           } else{
             console.log(data)
             console.log("Skipping over "+itemKey(userId,bucketName,data.id)+" because it's an empty object");

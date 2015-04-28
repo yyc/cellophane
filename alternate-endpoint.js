@@ -630,7 +630,6 @@ interceptor.on('connection', function(conn) {
               json.name=json.name.toLowerCase();
               if(captureTokens[json.token]){
                 user = captureTokens[json.token];
-                console.log("user",user);
                 clientId=json.clientid
                 conn.write(heads[0]+":auth:"+simperium.getUserById(user).username);
                 if(isNaN(channel)){
@@ -638,17 +637,16 @@ interceptor.on('connection', function(conn) {
                 }
                 //send index
                 channels[channel]=cache.addBucket(user,json.name);
-                console.log(simperium.getUserById(user).getBucket(json.name));
                 if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
                   console.log("bucket",channels[channel]);
-                  channels[channel].getIndex({limit:100,data:true}).then(function(response){
+                  channels[channel].getIndex({limit:100,data:false}).then(function(response){
                     console.log(json.name,"index",response);
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
                       ,current:response[1]
                       ,mark:response[2]
                     }));
-                    return Promise.resolve(index);
+                    return Promise.resolve(response[0]);
                   },function(error){
                     console.log("index error",error);
                     return Promise.reject(error);
@@ -728,7 +726,7 @@ interceptor.on('connection', function(conn) {
                     ,current:response[1]
                     ,mark:response[2]
                   }));
-                  return Promise.resolve(index);
+                  return Promise.resolve(response[0]);
                 },function(error){
                   console.log("index error",error);
                   return Promise.reject(error);
@@ -762,8 +760,22 @@ interceptor.on('connection', function(conn) {
               });
             break;
             case "e":
-            
-            
+              //format channelId:e:objectId.version
+              var data=message.split(":");
+              var channel=data[0];
+              data=data[2].split(".");
+              channels[channel].objectGet(data[0],data[1])
+              .then(function(response){
+                if(response){
+                  console.log("writing",channel+":e:"+data[0]+"."+data[1]+"\n"+response);
+                  conn.write(channel+":e:"+channel+":e:"+data[0]+"."+data[1]+"\n"+response);
+                }
+                else{
+                  console.log("Empty response");
+                }
+              },function(error){
+                console.log(error);
+              });
             break;
           }
         }
