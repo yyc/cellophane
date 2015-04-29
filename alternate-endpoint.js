@@ -767,8 +767,8 @@ interceptor.on('connection', function(conn) {
               channels[channel].objectGet(data[0],data[1])
               .then(function(response){
                 if(response){
-                  console.log("writing",channel+":e:"+data[0]+"."+data[1]+"\n"+response);
-                  conn.write(channel+":e:"+channel+":e:"+data[0]+"."+data[1]+"\n"+response);
+                  console.log("writing",channel+":e:"+data[0]+"."+data[1]+"\n"+JSON.stringify({data:response}));
+                  conn.write(channel+":e:"+data[0]+"."+data[1]+"\n"+JSON.stringify({data:response}));
                 }
                 else{
                   console.log("Empty response");
