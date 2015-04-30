@@ -343,12 +343,13 @@ describe("Object Checks",function(){
       , method: "GET"
       , qs:{
         data:true
-        , cv: cv
+        , cv: cv[0]
       }
     })
     .then(function(res){
       ary=JSON.parse(res);
       expect(ary.length).to.be.equal(2);
+      next();
     });
   });
 });

@@ -352,9 +352,25 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     });
   }
 });
-app.route("/1/:appName/:bucket/all").get(function(req,res,next){
-  
-  
+app.route("/1/:appName/:bucket/all").all(apiAll).get(function(req,res,next){
+  if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
+    cache.getChanges(req.user.userId,req.params.bucket,req.query.cv,false)
+    .then(function(response){
+      res.statusCode=200;
+      res.end(response);
+    },function(error){
+      res.statusCode=500;
+      res.end(error);
+    });
+  } else{
+    var options = {
+      hostname: "api.simperium.com",
+      path: req.url,
+      method: req.method || "GET",
+      headers: {"x-simperium-token":req.headers['x-simperium-token']}
+    };
+    passthrough(options,req,res);
+  }
 });
 
 app.route("/1/:appName/:bucket/i/:object_id")
@@ -740,7 +756,7 @@ interceptor.on('connection', function(conn) {
             break;
             case "cv":
               //Listen for new changes from cv
-//              channelName=channels[channel].subscribe(user,json.name);
+              channels[channel].subscribe(user,json.name);
               conn.write(channel+":c:[]");
             break;
             case "c":

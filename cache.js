@@ -166,6 +166,7 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
       self.db.zscore(ccidVersionsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
       self.db.hget(versionsKey(userId,bucketName),objectId);
+      self.db.zrevrange(cvKey(userId,bucketName),0,0);
       self.db.exec().then(function(response){
         if(response[0]){//change already made
           fulfill([response[1],412]);
@@ -174,6 +175,7 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
         }
         else{
           changeLog={delete:true,v:response[1]};
+          changeLog.cv=md5(response[2]+ccid);
           self.db.multi();
           self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
@@ -313,8 +315,27 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
 Cache.prototype.addBucket=function(userId,bucketName){
   return new Bucket(userId,bucketName);
 }
+Cache.prototype.getChanges=function(userId,bucketName,current,returnEmpty){
+  return new Promise(function(fulfill,reject){
+    var bucket=new Bucket(userId,bucketName);
+    bucket.getChanges(current,true)
+    .then(function(response){
+      console.log(4,response);
+      if(response.length || returnEmpty){
+        fulfill(response);
+        bucket.exit();
+      }else{
+        channels[channel].on("message",function(message){
+          fulfill(message);
+          bucket.exit();
+        });
+        bucket.subscribe();
+      }
+    });
+  });  
+}
 
-function Bucket(uid,bucket,cache){
+function Bucket(uid,bucket){
   EventEmitter.call(this);
   self=this;
   this.userId=uid;
@@ -348,16 +369,63 @@ Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
 Bucket.prototype.getIndex=function(options){
   return this.cache.getIndex(this.userId,this.bucketName,options);
 }
-Bucket.prototype.subscribe=function(userId,bucketName){
-  this.subscriber.subscribe(channelKey(this.userId,this.bucketName)).then(function(res){
+Bucket.prototype.subscribe=function(){
+  if(!this.subscribing){
+    this.subscribing=true;
+    this.subscriber.subscribe(channelKey(this.userId,this.bucketName)).then(function(res){
     console.log("Subscribed to",res);
   });
+  }
   return channelKey(this.userId,this.bucketName);
+}
+Bucket.prototype.getChanges=function(current,returnString){//returnString=true should be faster, but inconsistent with the implementation of the other functions.
+  var rd=this.cache.db;
+  var self=this;
+  var index;
+  return new Promise(function(fulfill,reject){
+    console.log(cvKey(self.userId,self.bucketName),current);
+    rd.zscore(cvKey(self.userId,self.bucketName),current)
+    .then(function(response){
+      if(response==null){
+        reject("Invalid cv");
+        return Promise.reject("Invalid cv");
+      } else{
+        index=response;
+        return rd.lindex(ccidsKey(self.userId,self.bucketName),response);
+      }
+    })
+    .then(function(response){
+      if(response==null){
+        //is current
+        return Promise.resolve([]);
+      } else{
+        //Change objects pending
+        return rd.lrange(ccidsKey(self.userId,self.bucketName),index,index+99);
+      }
+    })
+    .then(function(response){
+      if(response.length){
+        return rd.mget(response.map(ccidKey));
+      } else{
+        return Promise.resolve([]);
+      }
+    })
+    .then(function(response){
+      if(returnString){
+        fulfill('['+response.join(',')+']');
+      } else{
+        fulfill(response.map(function(element){
+          return JSON.stringify(element);
+        }));
+      }
+    });
+  });
 }
 Bucket.prototype.exit=function(){
   this.cache.exit();
   this.subscriber.quit();
 }
+
 /*
 
 function Connection(){//Each connection should have its own individual subscription
