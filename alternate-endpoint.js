@@ -114,9 +114,12 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
           hostname: "auth.simperium.com",
           path: "/1/"+req.appName+"/authorize/",
           port:443,
-          method: "POST",
-          headers: {"x-simperium-api-key":req.headers['x-simperium-api-key']}
+          method: "POST"
         };
+        if(req.headers['x-simperium-api-key']){
+          options.headers={"x-simperium-api-key":req.headers['x-simperium-api-key']};
+        }
+        debugger;
         remote=https.request(options,function(response){
           res.statusCode=response.statusCode;
           res.statusMessage=response.statusMessage;
@@ -602,7 +605,6 @@ interceptor.on('connection', function(conn) {
     var clientId;
     var remoteMessageQueue=[];
     var channel2index={};
-    var subscriber=new cachejs.Connection();
     conn.on('data', function(message) {
       if(message[0]=='h'){ // heartbeat
         conn.write("h:"+heartBeatCount);
@@ -640,7 +642,6 @@ interceptor.on('connection', function(conn) {
                 if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
                   console.log("bucket",channels[channel]);
                   channels[channel].getIndex({limit:100,data:false}).then(function(response){
-                    console.log(json.name,"index",response);
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
                       ,current:response[1]
@@ -691,12 +692,10 @@ interceptor.on('connection', function(conn) {
                     }
                   }
                 }
-                channelName=subscriber.subscribe(user,json.name);
-                subscriber.rd.on(channelName,function(channelName,message){
-                  console.log("websocket",channelName,message);
-                  conn.write(channel2index[channelName]+":c:"+message);
+                channels[channel].on("message",function(message){
+                  console.log("websocket",channel,message);
+                  conn.write(channel+":c:"+message);
                 });
-                channel2index[channelName]=channel;
               } else{ //not interested, create new remote connection and pass everything through
                 remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                 intercept=false;
@@ -720,7 +719,6 @@ interceptor.on('connection', function(conn) {
                 var mark=parseInt(query[1]);
                 var limit=query[query.length] || 100;
                 channels[channel].getIndex({limit:100,data:true}).then(function(response){
-                  console.log(11,response);
                   conn.write(channel+':'+'i:'+JSON.stringify({
                     index:response[0]
                     ,current:response[1]
@@ -737,9 +735,9 @@ interceptor.on('connection', function(conn) {
               }
             break;
             case "cv":
-              //Cache complete              
+              //Listen for new changes from cv
+//              channelName=channels[channel].subscribe(user,json.name);
               conn.write(channel+":c:[]");
-              subscriber.makeSubscribe();
             break;
             case "c":
               //Change object
@@ -760,14 +758,13 @@ interceptor.on('connection', function(conn) {
               });
             break;
             case "e":
-              //format channelId:e:objectId.version
+              //retrieving object.version
               var data=message.split(":");
               var channel=data[0];
               data=data[2].split(".");
               channels[channel].objectGet(data[0],data[1])
               .then(function(response){
                 if(response){
-                  console.log("writing",channel+":e:"+data[0]+"."+data[1]+"\n"+JSON.stringify({data:response}));
                   conn.write(channel+":e:"+data[0]+"."+data[1]+"\n"+JSON.stringify({data:response}));
                 }
                 else{
@@ -783,7 +780,9 @@ interceptor.on('connection', function(conn) {
     });
     conn.on('close', function() {
       cache.exit();
-      subscriber.exit();
+      channels.forEach(function(bucket){
+        bucket.exit();
+      })
     });
 });
 var proxy = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'
@@ -959,7 +958,6 @@ function cacheBucket(userId,bucketName,overwrite){
     })
     .then(function(itemLength){
       simperium.getUserById(userId).getBucket(bucketName).itemCount=itemLength;
-      console.log(simperium.getUserById(userId).getBucket(bucketName));
       fulfill();
     },function(error){
       log("cacheIndex error",error);

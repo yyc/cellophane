@@ -166,7 +166,6 @@ Bucket.prototype.index=function(options){
 }
 Bucket.prototype.getAll=function(){
   bucket=this;
-  console.log(bucket);
   return bucket.requestAllJson({
     url:"https://api.simperium.com"+bucket.bucketPath+"index"
     , qs: {

@@ -8,8 +8,7 @@ var md5=require("MD5");
 
 module.exports={
   Cache:Cache,
-  Bucket:Bucket,
-  Connection:Connection
+  Bucket:Bucket
   };
 
 function Cache(){
@@ -71,11 +70,11 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
     self.db.multi();
     if(ccid){//if ccid is set, it's a simperium API call
       //check if change has been submitted before. ccid=client change id
-      self.db.zscore(ccidsKey(userId,bucketName),ccid);
+      self.db.zscore(ccidVersionsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
       self.db.hget(versionsKey(userId,bucketName),objectId);
       self.db.get(itemKey(userId,bucketName,objectId));
-      self.db.get(currentKey(userId,bucketName));
+      self.db.zrevrange(cvKey(userId,bucketName),0,0);
       self.db.exec().then(function(response){
         if(response[0]||options.version<response[1]){
           //Change has already been made or is already outdated, fulfill with false for the success param
@@ -85,12 +84,12 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             fulfill([false,response[1]]);
           }
           if(!response[0]){
-            //record change anyway
+            //record outdated change anyway
             changeLog=(options||{});
             changeLog.c=true;//conflict
             changeLog.d=data;
             changeLog.id=objectId;
-            self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+            self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
             self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
           }
         }
@@ -109,11 +108,11 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             //If version is not set then the latest version is updated
             options.version=response[1];
           }
-          changeLog=(options||{});
+          var changeLog=(options||{});
           changeLog.c=false; //no conflicts
           changeLog.id=objectId;
           changeLog.sv=parseInt(response[1]);
-          changeLog.cv=md5(response[3]);
+          changeLog.cv=md5(response[3]+ccid);
           //if version is set, check that it is the same or greater than the one currently stored
           if(options.diffObj){
             //apply jsondiff merge
@@ -128,7 +127,8 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             changeLog.v =jd.object_diff(obj,data);
           }
           self.db.multi();
-          self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+          self.db.rpush(ccidsKey(userId,bucketName),ccid);
+          self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
           self.db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
           self.db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),JSON.stringify(obj));
@@ -141,6 +141,7 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           },changeLog)]));
           self.db.exec().then(function(response2){
             if(response2!=null){
+              self.db.zadd(cvKey(userId,bucketName),response2[0],changeLog.cv);
               fulfill([true,response[1]*1+1,obj]);
             } else{
               reject("redis error");
@@ -162,7 +163,7 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
     if(ccid){//if ccid is set, it's a simperium API call
       self.db.multi();
       //check if change has been submitted before. ccid=client change id
-      self.db.zscore(ccidsKey(userId,bucketName),ccid);
+      self.db.zscore(ccidVersionsKey(userId,bucketName),ccid);
       //check for version numbers to determine whether I should overwrite
       self.db.hget(versionsKey(userId,bucketName),objectId);
       self.db.exec().then(function(response){
@@ -174,7 +175,7 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
         else{
           changeLog={delete:true,v:response[1]};
           self.db.multi();
-          self.db.zadd(ccidsKey(userId,bucketName),response[1],ccid);
+          self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
           self.db.del(itemKey(userId,bucketName,objectId));
           self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
@@ -222,9 +223,9 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
         });
         promiseArray=[];
         self.db.hmset(versionsKey(userId,bucketName),versionHash);
-        self.db.del(ccidsKey(userId,bucketName));
+        self.db.del(ccidVersionsKey(userId,bucketName));
         if(!bucketIndex.mark){//only set currentKey if the cache is complete
-          self.db.set(currentKey(userId,bucketName),current);
+          self.db.zadd(cvKey(userId,bucketName),0,current);
         }
         self.db.exec().then(function(){
           console.log("Successfully cached "+res.length+" items in "+bucketName);
@@ -262,7 +263,6 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
           if(Object.keys(keys[1]).length){
             var keyArray=Object.keys(keys[1]);
             self.db.mget(keyArray.map(mapItemKey(userId,bucketName))).then(function(objArray){
-            console.log("mget result",bucketName,keyArray,objArray);
             for(i=0;i<keyArray.length;i++){
               if(objArray[i]&&objArray[i]!="null"){
                 index.push({
@@ -302,7 +302,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
         return Promise.reject(error);
     })
     .then(function(res){
-      self.db.get(currentKey(userId,bucketName)).then(function(curr){
+      self.db.zrevrange(cvKey(userId,bucketName),0,0).then(function(curr){
         fulfill([res[0],curr,res[1]]);
       });
     },function(error){
@@ -315,12 +315,23 @@ Cache.prototype.addBucket=function(userId,bucketName){
 }
 
 function Bucket(uid,bucket,cache){
+  EventEmitter.call(this);
+  self=this;
   this.userId=uid;
   this.bucketName=bucket;
   this.cache=new Cache();
   this.cache.db.send("CLIENT",['SETNAME',bucket]);
-
+  this.subscriber=redis.createClient();
+  this.subscriber.on("message",function(channel,message){
+    console.log("cache",channel,message);
+    this.emit(channel,channel,message);
+  });
+  this.subscriber.on("message",function(channel,message){
+    console.log("cache",channel,message);
+    this.emit("message",message);
+  });
 }
+util.inherits(Bucket,EventEmitter);
 Bucket.prototype.objectGet=function(objectId,objectVersion){
   return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion);
 }
@@ -337,6 +348,17 @@ Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
 Bucket.prototype.getIndex=function(options){
   return this.cache.getIndex(this.userId,this.bucketName,options);
 }
+Bucket.prototype.subscribe=function(userId,bucketName){
+  this.subscriber.subscribe(channelKey(this.userId,this.bucketName)).then(function(res){
+    console.log("Subscribed to",res);
+  });
+  return channelKey(this.userId,this.bucketName);
+}
+Bucket.prototype.exit=function(){
+  this.cache.exit();
+  this.subscriber.quit();
+}
+/*
 
 function Connection(){//Each connection should have its own individual subscription
   EventEmitter.call(this);
@@ -356,13 +378,12 @@ function Connection(){//Each connection should have its own individual subscript
 }
 util.inherits(Connection,EventEmitter);
 Connection.prototype.subscribe=function(userId,bucketName){
-  this.subscriptionList.push(channelKey(userId,bucketName));
   return channelKey(userId,bucketName);
 }
 Connection.prototype.makeSubscribe=function(){
   if(this.subscriptionList.length){
     this.rd.subscribe(this.subscriptionList).then(function(response){
-      console.log("Subscribed to "+this.subscriptionList);
+      console.log("Subscribed to ",this.subscriptionList);
     });
     this.subscriptionList=[];
   } else{
@@ -373,8 +394,13 @@ Connection.prototype.makeSubscribe=function(){
 Connection.prototype.exit=function(){
   this.rd.quit();
 }
+*/
 
 function itemKey(userId,bucketName,itemId,objectVersion){
+  /* Objects are stored as simple strings in the format
+    userid-bucketName-itemId which is always current, and 
+    userid-bucketName-itemId~version which gives the specified version    
+    */
   if(objectVersion){
     return userId+"-"+bucketName+"-"+itemId+"~"+objectVersion;
   } else{
@@ -386,22 +412,52 @@ function mapItemKey(userId,bucketName){
     return itemKey(userId,bucketName,objectId);
   }
 }
+
 function versionsKey(userId,bucketName){
+/*
+  {
+    objectId:version
+    2c35b27058491675bc906c0d2f76c66e:2
+  }
+*/
     return userId+"-"+bucketName+"~keys";
 }
-function ccidsKey(userId,bucketName){
-    return userId+"-"+bucketName+"~ccids";
+function ccidVersionsKey(userId,bucketName){
+  /* Sorted set of all changes pushed, regardless of whether they took effect.
+    This Is flushed periodically when doing conflict resolution
+    set of ccids, sorted by the specified cv
+    
+    */
+    return userId+"-"+bucketName+"~changes";
 }
 function ccidKey(ccid){
+  /* change objects are stored as serialized strings, in the following keys.
+    Don't flush this, since the API needs this to update outdated clients. */
   return "ccid~"+ccid;
 }
-function currentKey(userId,bucketName){
-    return userId+"-"+bucketName+"~current";
+function cvKey(userId,bucketName){
+  /* sorted list of CVs.
+    The score for CV corresponds to the length of ccidsKey after the change was pushed.
+    So if it's current, lrange(ccidsKey,score,score) would be null
+    so you can just iterate through subsequent changes by usign lrange(ccidsKey,score,score+10)
+    */
+    return userId+"-"+bucketName+"~cvs";
+}
+function ccidsKey(userId,bucketName){
+  //List of ccids, in the order they were inserted
+  return userId+'-'+bucketName+"~ccids";
 }
 function channelKey(userId,bucketName){
+  /* Pub/Sub channel for a particular userId-bucketName */
   return userId+"-"+bucketName;
 }
 function parseArray(array){
+  /*
+    turns a redis response [key1,obj1,key2,obj2] into 
+    {key1:obj1
+      , key2:obj2
+      }
+    */
   hash={};
   for(i=0;i<array.length;i+=2){
     val=parseInt(array[i+1]);
