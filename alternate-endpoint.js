@@ -352,6 +352,10 @@ app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
     });
   }
 });
+app.route("/1/:appName/:bucket/all").get(function(req,res,next){
+  
+  
+});
 
 app.route("/1/:appName/:bucket/i/:object_id")
 .all(apiAll).all(objectAll)

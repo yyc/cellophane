@@ -35,6 +35,7 @@ var remote="";
 var local="";
 var bucketList={};
 var bucketIndex={};
+var cv;
 describe("Ditto Checks",function(){
   describe("Auth tests",function(){
     it("Remote Call",function(done){
@@ -234,7 +235,6 @@ describe("simperium.js Checks",function(){
   });
   
 });
-
 describe("Caching Checks",function(){
   it('List Buckets',function(done){
     request
@@ -266,6 +266,7 @@ describe("Caching Checks",function(){
     })
     .then(function(res){
       local=JSON.parse(res);
+      cv=local.current;
       expect(local).to.be.a("object");
 //      expect(local.index.length).to.be.at.most(104);
       bucketIndex=local;
@@ -280,6 +281,25 @@ describe("Caching Checks",function(){
     expect(result).to.be.equal(0);
     done();
   });
+/*
+  //Should work with long polling, and so should time out
+  it("Get all changes",function(done){
+    request
+    .get({
+      uri: localHost+"/1/"+appName+"/"+testBucket+"/all"
+      , headers:{"X-Simperium-Token":accessToken}
+      , method: "GET"
+      , qs:{
+        data:true
+        , cv: cv
+      }
+    })
+    .then(function(res){
+      ary=JSON.parse(res);
+      expect(ary.length).to.be.equal(0);
+    });
+  });
+*/
 });
 
 describe("Object Checks",function(){
@@ -315,7 +335,22 @@ describe("Object Checks",function(){
       done();
     });
   });
-  
+  it("Get new changes",function(done){
+    request
+    .get({
+      uri: localHost+"/1/"+appName+"/"+testBucket+"/all"
+      , headers:{"X-Simperium-Token":accessToken}
+      , method: "GET"
+      , qs:{
+        data:true
+        , cv: cv
+      }
+    })
+    .then(function(res){
+      ary=JSON.parse(res);
+      expect(ary.length).to.be.equal(2);
+    });
+  });
 });
 
 function compare(sub,set,ignoreList){
