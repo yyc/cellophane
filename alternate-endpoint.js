@@ -660,8 +660,7 @@ interceptor.on('connection', function(conn) {
                 //send index
                 channels[channel]=cache.addBucket(user,json.name);
                 if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
-                  console.log("bucket",channels[channel]);
-                  channels[channel].getIndex({limit:100,data:false}).then(function(response){
+                  channels[channel].getIndex({limit:100,data:true}).then(function(response){
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
                       ,current:response[1]
@@ -678,7 +677,6 @@ interceptor.on('connection', function(conn) {
                     intercept=false;
                     remoteMessageQueue.push(message);
                     remote.onopen=function(){
-                      console.log(remote.readyState);
                       while(remoteMessageQueue.length){
                         remote.send(remoteMessageQueue.shift());
                       }
@@ -756,26 +754,40 @@ interceptor.on('connection', function(conn) {
             break;
             case "cv":
               //Listen for new changes from cv
-              channels[channel].subscribe(user,json.name);
+              channels[channel].subscribe();
               conn.write(channel+":c:[]");
             break;
             case "c":
               //Change object
               json=JSON.parse(data);
-              console.log(json);
-              console.log(1)
-              channels[channel].objectSet(json.id,json.v,{version:json.sv,diffObj:true,clientid:clientId},json.ccid)
-              .then(function(res){
-                console.log(8,res);
-                if(res[0]==false){
-                  conn.write(channel+":c:"+JSON.stringify([
-                  {ccids: [json.ccid]
-                    , clientid:clientId
-                    , id: json.id
-                    , error: 409
-                  }]));
-                }
-              });
+              if(json.o=="-"){
+                //delete instead
+                channels[channel].objectDelete(json.id,json.v,json.ccid)
+                .then(function(res){
+                  console.log("delete res",res);
+                  if(res[1]!=200){
+                    conn.write(channel+":c"+JSON.stringify([{
+                      error: res[1]
+                      , id: json.id
+                      , clientid:clientId
+                    }]));
+                  }
+                });
+              }
+              else{
+                channels[channel].objectSet(json.id,json.v,{version:json.sv,diffObj:true,clientid:clientId},json.ccid)
+                .then(function(res){
+                  console.log(8,res);
+                  if(res[0]==false){
+                    conn.write(channel+":c:"+JSON.stringify([
+                    {ccids: [json.ccid]
+                      , clientid:clientId
+                      , id: json.id
+                      , error: 409
+                    }]));
+                  }
+                });
+              }
             break;
             case "e":
               //retrieving object.version

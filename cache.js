@@ -12,7 +12,7 @@ module.exports={
   };
 
 function Cache(clientid){
-  this.clientid=clientid || "celldaemon";
+  this.clientid=clientid || "cellodaemon";
   this.eventMessages={};
   this.db=redis.createClient();  
 };
@@ -317,7 +317,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
     })
     .then(function(res){
       self.db.zrevrange(cvKey(userId,bucketName),0,0).then(function(curr){
-        fulfill([res[0],curr,res[1]]);
+        fulfill([res[0],curr[0],res[1]]);
       });
     },function(error){
       reject(error);
@@ -355,13 +355,10 @@ function Bucket(uid,bucket){
   this.cache=new Cache();
   this.cache.db.send("CLIENT",['SETNAME',bucket]);
   this.subscriber=redis.createClient();
+  this.subscriber._parent=this;
   this.subscriber.on("message",function(channel,message){
     console.log("cache",channel,message);
-    this.emit(channel,channel,message);
-  });
-  this.subscriber.on("message",function(channel,message){
-    console.log("cache",channel,message);
-    this.emit("message",message);
+    this._parent.emit("message",message);
   });
 }
 util.inherits(Bucket,EventEmitter);
@@ -372,7 +369,7 @@ Bucket.prototype.objectSet=function(objectId,data,options,ccid){
   return this.cache.objectSet(this.userId,this.bucketName,objectId,data,options,ccid);
 }
 Bucket.prototype.objectDelete=function(objectId,objectVersion,ccid){
-  return this.cache.objectGet(this.userId,this.bucketName,objectId,objectVersion,ccid);
+  return this.cache.objectDelete(this.userId,this.bucketName,objectId,objectVersion,ccid);
 }
 Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
   ;
