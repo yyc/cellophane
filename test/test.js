@@ -343,7 +343,7 @@ describe("Object Checks",function(){
       , method: "GET"
       , qs:{
         data:true
-        , cv: cv[0]
+        , cv: cv
       }
     })
     .then(function(res){

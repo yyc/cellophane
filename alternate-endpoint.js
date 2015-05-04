@@ -711,7 +711,6 @@ interceptor.on('connection', function(conn) {
                   }
                 }
                 channels[channel].on("message",function(message){
-                  console.log("websocket",channel,message);
                   conn.write(channel+":c:"+message);
                 });
               } else{ //not interested, create new remote connection and pass everything through
