@@ -988,6 +988,9 @@ function cacheBucket(userId,bucketName,overwrite){
 function testData(downsync){
   return new Promise(function(fulfill,reject){
     var ary=[];
+    cache.db.flushdb().then(function(res){
+      console.log("DB flushed",res);
+    })
     authorizeUser({username:testUsername
       ,password:testPassword
       ,appName:simperiumAppName

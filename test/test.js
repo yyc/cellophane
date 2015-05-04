@@ -349,7 +349,7 @@ describe("Object Checks",function(){
     .then(function(res){
       ary=JSON.parse(res);
       expect(ary.length).to.be.equal(2);
-      next();
+      done();
     });
   });
 });

@@ -11,7 +11,8 @@ module.exports={
   Bucket:Bucket
   };
 
-function Cache(){
+function Cache(clientid){
+  this.clientid=clientid || "celldaemon";
   this.eventMessages={};
   this.db=redis.createClient();  
 };
@@ -87,7 +88,8 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             //record outdated change anyway
             changeLog=(options||{});
             changeLog.c=true;//conflict
-            changeLog.d=data;
+            changeLog.v=data;
+            changeLog.sv=options.version || response[1];
             changeLog.id=objectId;
             self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
             self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
@@ -126,6 +128,12 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
             //add changeobject to changelog
             changeLog.v =jd.object_diff(obj,data);
           }
+          merge(changeLog,{
+            "id": objectId
+            , "o": "M"
+            , "ev": (response[1]*1)+1
+            , "ccids": [ccid]
+          });
           self.db.multi();
           self.db.rpush(ccidsKey(userId,bucketName),ccid);
           self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
@@ -133,12 +141,7 @@ Cache.prototype.objectSet=function(userId,bucketName,objectId,data,options,ccid)
           self.db.set(itemKey(userId,bucketName,objectId),JSON.stringify(obj));
           self.db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),JSON.stringify(obj));
           self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
-          self.db.publish(channelKey(userId,bucketName),JSON.stringify([merge({
-            "id": objectId
-            , "o": "M"
-            , "ev": (response[1]*1)+1
-            , "ccids": [ccid]
-          },changeLog)]));
+          self.db.publish(channelKey(userId,bucketName),JSON.stringify([changeLog]));
           self.db.exec().then(function(response2){
             if(response2!=null){
               self.db.zadd(cvKey(userId,bucketName),response2[0],changeLog.cv);
@@ -174,13 +177,22 @@ Cache.prototype.objectDelete=function(userId,bucketName,objectId,version,ccid){
             fulfill([response[1],412]);
         }
         else{
-          changeLog={delete:true,v:response[1]};
+          changeLog={o:"-"
+            ,v:response[1]
+            ,ev:response[1]+1
+            ,id:objectId
+            ,ccids:[ccid]};
           changeLog.cv=md5(response[2]+ccid);
+          changeLog.clientid=self.clientid;
           self.db.multi();
+          self.db.rpush(ccidsKey(userId,bucketName),ccid);
           self.db.zadd(ccidVersionsKey(userId,bucketName),response[1],ccid);
           self.db.set(ccidKey(ccid),JSON.stringify(changeLog));
-          self.db.del(itemKey(userId,bucketName,objectId));
+          self.db.set(itemKey(userId,bucketName,objectId),"");
+          self.db.set(itemKey(userId,bucketName,objectId,response[1]*1+1),"");
           self.db.hincrby(versionsKey(userId,bucketName),objectId,1);
+          self.db.publish(channelKey(userId,bucketName),JSON.stringify([changeLog]));
+
           self.db.exec().then(function(response2){
             console.log(response2);
             fulfill([response2[3],200])
