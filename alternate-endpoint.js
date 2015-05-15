@@ -212,6 +212,7 @@ var objectPresent=function(req,res,next){
     else{
        simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
       .then(function(response){
+        console.log(response);
         console.log(response.statusCode,response.json);
         res.statusCode=response.statusCode;
         if(response.headers["x-simperium-version"]){
@@ -434,10 +435,18 @@ io.on('connection',function(socket){
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
         activeApps[appName]=1;
-       interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
-        console.log(interceptor);
+        interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
         for(var key in user.buckets){
-          ary.push(cacheBucket(user,key));
+          cache.bucketCount(user.userId,key).then(function(res){
+            console.log(user.userId,res[0],res[1]);
+            if(res[1]){
+              user.getBucket(key).itemCount=parseInt(res[1]);
+            }
+          })
+        }
+ /*
+       for(var key in user.buckets){
+          ary.push(cacheBucket(user.userId,key,false));
         }
         Promise.all(ary).then(function(response){
           socket.emit("reply","Buckets cached");
@@ -445,6 +454,7 @@ io.on('connection',function(socket){
           socket.emit("error","Buckets couldn't be cached");
           log(error);
         });
+*/
       },function(error){
           socket.emit("reply","error authorizing user "+error);
           log(error);

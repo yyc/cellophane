@@ -181,7 +181,7 @@ Bucket.prototype.getAll=function(){
 }
 Bucket.prototype.itemRequest=function(itemId,method,version){
   //returns full response with headers and status code, not just the response body.
-  url="https://api.simperium.com"+bucket.bucketPath+"i/"+itemId;
+  url="https://api.simperium.com"+this.bucketPath+"i/"+itemId;
   if(version){
     url+="/v/"+version;
   }

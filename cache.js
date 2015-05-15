@@ -7,9 +7,17 @@ var redis=require("then-redis");
 var md5=require("MD5");
 
 module.exports={
+  Auth:Auth
   Cache:Cache,
   Bucket:Bucket
   };
+
+function Auth(){
+  this.db=redis.createClient();
+}
+Auth.prototype.exit=function(){
+  this.db.quit();
+}
 
 function Cache(clientid){
   this.clientid=clientid || "cellodaemon";
@@ -49,6 +57,11 @@ db.scanSet=function(key){
 Cache.prototype.exit=function(){
   //close redis connection
   this.db.quit();
+}
+Cache.prototype.bucketCount=function(userId,bucketName){
+  return this.db.hlen(versionsKey(userId,bucketName)).then(function(itemCount){
+    return Promise.resolve([bucketName,itemCount])
+    });
 }
 Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
   return this.db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
@@ -357,7 +370,6 @@ function Bucket(uid,bucket){
   this.subscriber=redis.createClient();
   this.subscriber._parent=this;
   this.subscriber.on("message",function(channel,message){
-    console.log("cache",channel,message);
     this._parent.emit("message",message);
   });
 }
@@ -372,7 +384,6 @@ Bucket.prototype.objectDelete=function(objectId,objectVersion,ccid){
   return this.cache.objectDelete(this.userId,this.bucketName,objectId,objectVersion,ccid);
 }
 Bucket.prototype.cacheIndex=function(bucketIndex,overwrite){
-  ;
   return this.cache.cacheIndex(this.userId,this.bucketName,bucketIndex,overwrite);
 }
 Bucket.prototype.getIndex=function(options){
