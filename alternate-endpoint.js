@@ -88,13 +88,11 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
       res.end(JSON.stringify({buckets:array}));
     }else{
       user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-      user.bucketList(user,function(err,response){
-        if(!err){
+      user.bucketList().then(function(response){
           res.end(JSON.stringify(response));
-        }else{
-          res.end(response);
-          log(response);
-        }
+        },function(error){
+          res.end(error);
+          console.log(95,error);
       });
     }
   }
@@ -432,14 +430,14 @@ io.on('connection',function(socket){
   });
   socket.on("add",function(payload){
     if(payload.length>=2){
-      username=payload[0];
-      password=payload[1];
-      if(payload.length=4){
-        appName=payload[2];
-        apiKey=payload[3];
+      var username=payload[0];
+      var password=payload[1];
+      if(payload.length==4){
+        var appName=payload[2];
+        var apiKey=payload[3];
       } else{
-        appName=simperiumAppName;
-        apiKey=simperiumApiKey;
+        var appName=simperiumAppName;
+        var apiKey=simperiumApiKey;
       }
       authorizeUser({username:username
         ,password:password
@@ -906,7 +904,24 @@ authd.getApps().then(function(res){
     interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
     console.log("Installed handlers on /sock/1/"+appName);
   });
-  return Promise.resolve(res);
+  return authd.getUsers(false);
+}).then(function(users){
+  if(users != null){
+    Object.keys(users).forEach(function(key){
+      var json=JSON.parse(users[key]);
+      var user;
+      authd.getToken(json.userId).then(function(accessToken){
+        user=simperium.init(json.appName,json.userId,accessToken);
+        return cache.bucketList(json.userId);
+      }).then(function(bucketList){
+        console.log(bucketList);
+        user.bucketList(bucketList);
+      });
+    });
+  }
+  else{
+    console.log("No user data stored in redis");
+  }
 });
 
 httpListener.listen(port,function(){
@@ -977,7 +992,6 @@ function authorizeUser(options){
           log("user is null for some reason",activeUsers);
           simperium.authorize(apiKey,appName,options.username,options.password)
           .then(function(user){
-            console.log(user);
             authd.addUser(user.userName,user.password,user.userId,appName);
             authd.addToken(user.userId,user.accessToken);
             authd.addApp(appName);            
@@ -997,8 +1011,12 @@ function authorizeUser(options){
             reject("Incorrect Username or Password");
           }
           else{
+            console.log("No redis auth records, querying Simperium..");
             simperium.authorize(apiKey,appName,options.username,options.password)
             .then(function(user){
+                authd.addUser(user.username,user.password,user.userId,appName);
+                authd.addToken(user.userId,user.accessToken);
+                authd.addApp(appName);            
                 fulfill(user);
               },function(error){
                 reject(error);
@@ -1058,7 +1076,6 @@ function testData(downsync){
       accessToken=user.accessToken
       captureTokens[accessToken]=user.userId;
       activeUsers[testUsername]=user.userId;
-      captureTokens[accessToken]=activeUsers[testUsername];
       if(downsync!="false"&&downsync!=false){
         for(var key in user.buckets){
           ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));

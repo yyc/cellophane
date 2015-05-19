@@ -43,7 +43,7 @@ function authorize(apiKey,appName,username,password){
           }
         ,function(error){
           reject(error);
-      }).then(function(resp){
+      }).then(function(){
           authenticatedUsers[user.userId]=user;
           fulfill(authenticatedUsers[user.userId]);
         },function(error){
@@ -80,24 +80,32 @@ function User(){
   var userId;
   var accessToken;
   var buckets;
-  var bucketList;
 }
-User.prototype.bucketList=function(){
+User.prototype.bucketList=function(buckets){
   self=this;
-  return new Promise(function(fulfill,reject){
-    request.get({
-        url: "https://api.simperium.com/1/"+self.appName+"/buckets",
-        headers: {"x-simperium-token":self.accessToken}
-    }).then(function(json){
-        self.buckets={};
-        for(i=0;i<json.buckets.length;i++){
-          self.getBucket(json.buckets[i].name.toLowerCase());
-        }
-        fulfill(json);
-      },function(error){
-        reject(error);
-      });
+  if(buckets){
+    self.buckets={};
+    buckets.forEach(function(bucketName){
+      self.getBucket(bucketName);
     });
+    return Promise.resolve();
+  }
+  else{
+    return new Promise(function(fulfill,reject){
+      request.get({
+          url: "https://api.simperium.com/1/"+self.appName+"/buckets",
+          headers: {"x-simperium-token":self.accessToken}
+      }).then(function(json){
+          self.buckets={};
+          for(i=0;i<json.buckets.length;i++){
+            self.getBucket(json.buckets[i].name.toLowerCase());
+          }
+          fulfill(json);
+        },function(error){
+          reject(error);
+        });
+      });
+  }
 }
 User.prototype.getBucket=function(bucketName){
   if(this.buckets[bucketName]){//bucket already initialized

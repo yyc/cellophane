@@ -21,14 +21,22 @@ Auth.prototype.getApps=function(){
 Auth.prototype.addApp=function(appName){
   return this.db.sadd("~apps",appName);
 }
-Auth.prototype.getUsers=function(){
-  return this.db.hkeys("~users");
+Auth.prototype.getUsers=function(namesonly){
+  if(namesonly){
+    return this.db.hkeys("~users");
+  }
+  else{
+    return this.db.hgetall("~users");
+  }
 }
 Auth.prototype.getUser=function(access_token){
   return this.db.hget("~accessTokens",access_token);
 }
 Auth.prototype.addUser=function(username,password,userId,appName){
   return this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
+}
+Auth.prototype.getToken=function(userId){
+  
 }
 Auth.prototype.authorize=function(username,password){
   var self=this;
@@ -56,7 +64,9 @@ Auth.prototype.addToken=function(userId,token){
   return this.db.hset("~accessTokens",token,userId).then(function(){
       return self.db.hset("~userTokens",userId,token);
     });
-  
+}
+Auth.prototype.getToken=function(userId){
+  return this.db.hget("~userTokens",userId);
 }
 Auth.prototype.exit=function(){
   this.db.quit();
