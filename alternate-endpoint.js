@@ -20,6 +20,7 @@ module.exports={
 var simperium=require("./simperium");
 var cachejs=require("./cache");
 cache=new cachejs.Cache();
+var authd=new cachejs.Auth();
 var merge=require("./merge_recursively");
 
 //Load default configurations
@@ -41,7 +42,6 @@ merge(options,defaultOptions);
 var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
 
 
-
 function start(done){
 //Getting all auth requests and /buckets (since they match the same route pattern
 app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
@@ -50,33 +50,23 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   if(req.headers['x-simperium-token']){
     //This route should only match the api.simperium.com/1/appName/buckets method
     if(captureTokens[req.headers['x-simperium-token']]){
-      //capture
-       var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-      if(user){
-        array=[];
-        for(var key in user.buckets){
-          array.push({name:key});
+      next();
+    }
+    else{
+      authd.getUser(req.headers['x-simperium-token']).then(function(userId){
+        if(userid){
+          
         }
-        res.end(JSON.stringify({buckets:array}));
-      }else{
-        user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-        user.bucketList(user,function(err,response){
-          if(!err){
-            res.end(JSON.stringify(response));
-          }else{
-            res.end(response);
-            log(response);
-          }
-        });
-      }
-    } else{
-      var options = {
-        hostname: "api.simperium.com",
-        path: req.url,
-        method: req.method || "GET",
-        headers: {"x-simperium-token":req.headers['x-simperium-token']}
-      };
-      passthrough(options,req,res);
+        else{
+          var options = {
+            hostname: "api.simperium.com",
+            path: req.url,
+            method: req.method || "GET",
+            headers: {"x-simperium-token":req.headers['x-simperium-token']}
+          };
+          passthrough(options,req,res);
+        }
+      });
     } 
   }else if(req.action=="buckets"){
     res.statusCode=401;
@@ -86,12 +76,37 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   else{
     next();
   }
-}).get(function(req,res,next){
-  log("GET request detected");
-  if(req.action=="buckets"){
-    
+}).all(function(req,res,next){
+  if(req.headers["x-simperium-token"]){
+    //capture
+     var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
+    if(user){
+      array=[];
+      for(var key in user.buckets){
+        array.push({name:key});
+      }
+      res.end(JSON.stringify({buckets:array}));
+    }else{
+      user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+      user.bucketList(user,function(err,response){
+        if(!err){
+          res.end(JSON.stringify(response));
+        }else{
+          res.end(response);
+          log(response);
+        }
+      });
+    }
   }
-  next();
+  else{
+    next();
+  }
+  }).get(function(req,res,next){
+    log("GET request detected");
+    if(req.action=="buckets"){
+      
+    }
+    next();
 }).post(function(req,res,next){
   //Only authorize is of any interest, we can let the rest through without parsing
   if(req.action=="authorize"){
@@ -119,7 +134,6 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
         if(req.headers['x-simperium-api-key']){
           options.headers={"x-simperium-api-key":req.headers['x-simperium-api-key']};
         }
-        debugger;
         remote=https.request(options,function(response){
           res.statusCode=response.statusCode;
           res.statusMessage=response.statusMessage;
@@ -166,21 +180,23 @@ var apiAll=function(req,res,next){
     res.statusMessage = "Unauthorized";
     res.end("401 Unauthorized: Missing Token");
   }else{
-    if(captureTokens[req.headers["x-simperium-token"]]){
-      req.user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-      if(!req.user){
-        req.user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
+    authd.getUser(req.headers['x-simperium-token']).then(function(userId){
+      if(userId){
+        req.user=simperium.getUserByToken(userId);
+        if(!req.user){
+          req.user = simperium.init(req.appName,userId,req.headers['x-simperium-token']);
+        }
       }
-      next();
-    } else{
-      var options = {
-        hostname: "api.simperium.com",
-        path: req.url,
-        method: req.method || "GET",
-        headers: {"x-simperium-token":req.headers['x-simperium-token']}
-      };
-      passthrough(options,req,res);
-    }
+      else{
+        var options = {
+          hostname: "api.simperium.com",
+          path: req.url,
+          method: req.method || "GET",
+          headers: {"x-simperium-token":req.headers['x-simperium-token']}
+        };
+        passthrough(options,req,res);
+      }
+    })
   }
 }
 var objectAll=function(req,res,next){
@@ -212,7 +228,6 @@ var objectPresent=function(req,res,next){
     else{
        simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
       .then(function(response){
-        console.log(response);
         console.log(response.statusCode,response.json);
         res.statusCode=response.statusCode;
         if(response.headers["x-simperium-version"]){
@@ -435,7 +450,9 @@ io.on('connection',function(socket){
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
         activeApps[appName]=1;
+        authd.addApp(appName);
         interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
+        authd.addUser(username,password,user.userId);
         for(var key in user.buckets){
           cache.bucketCount(user.userId,key).then(function(res){
             console.log(user.userId,res[0],res[1]);
@@ -625,7 +642,6 @@ io.on('connection',function(socket){
 
 //SocketJS to handle WebSocket API calls
 var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
-interceptor.installHandlers(httpListener,{prefix:"/sock/1/*"})
 interceptor.on('connection', function(conn) {
     var heartBeatCount=0;
     var intercept=true;
@@ -723,7 +739,7 @@ interceptor.on('connection', function(conn) {
                 channels[channel].on("message",function(message){
                   conn.write(channel+":c:"+message);
                 });
-              } else{ //not interested, create new remote connection and pass everything through
+              } else{ //not interested, create new remote connection and pass everything through         
                 remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                 intercept=false;
                 remoteMessageQueue.push(message);
@@ -885,6 +901,14 @@ app.route("/sock/1/:app_id/info").get(function(req,res,next){
 */
 });
 
+authd.getApps().then(function(res){
+  res.forEach(function(appName){
+    interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
+    console.log("Installed handlers on /sock/1/"+appName);
+  });
+  return Promise.resolve(res);
+});
+
 httpListener.listen(port,function(){
   if(done){
     done();
@@ -942,8 +966,8 @@ function delayedPromise(ms){ // quick promisified delay function
 }
 function authorizeUser(options){
   return new Promise(function(fulfill,reject){
-    apiKey = options.apiKey || simperiumApiKey;
-    appName = options.appName || simperiumAppName;
+    var apiKey = options.apiKey || simperiumApiKey;
+    var appName = options.appName || simperiumAppName;
     if(options.username){
       if(activeUsers[options.username]){
         user=simperium.getUserById(activeUsers[options.username]);
@@ -953,6 +977,10 @@ function authorizeUser(options){
           log("user is null for some reason",activeUsers);
           simperium.authorize(apiKey,appName,options.username,options.password)
           .then(function(user){
+            console.log(user);
+            authd.addUser(user.userName,user.password,user.userId,appName);
+            authd.addToken(user.userId,user.accessToken);
+            authd.addApp(appName);            
             fulfill(user);
           },function(error){
             reject(error);
@@ -960,13 +988,23 @@ function authorizeUser(options){
         }
       }
       else{
-  //For production can just make this pass through. Or maybe not? Would be useful to capture all auth data.
-        simperium.authorize(apiKey,appName,options.username,options.password)
-        .then(function(user){
-            fulfill(user);
-          },function(error){
-            reject(error);
-          });
+        console.log("No record found, checking redis..");
+        //Check redis, then only do actual authorization with Simperium as a last resort
+        authd.authorize(options.username,options.password).then(function(user){
+          fulfill(simperium.init(user.appName,user.userId,user.accessToken));
+        },function(rej){
+          if(rej==1){//Incorrect password
+            reject("Incorrect Username or Password");
+          }
+          else{
+            simperium.authorize(apiKey,appName,options.username,options.password)
+            .then(function(user){
+                fulfill(user);
+              },function(error){
+                reject(error);
+            });
+          }
+        });
       }
     } else{
       reject("Missing username");

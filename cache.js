@@ -7,13 +7,56 @@ var redis=require("then-redis");
 var md5=require("MD5");
 
 module.exports={
-  Auth:Auth
+  Auth:Auth,
   Cache:Cache,
   Bucket:Bucket
   };
 
 function Auth(){
   this.db=redis.createClient();
+}
+Auth.prototype.getApps=function(){
+  return this.db.smembers("~apps");
+}
+Auth.prototype.addApp=function(appName){
+  return this.db.sadd("~apps",appName);
+}
+Auth.prototype.getUsers=function(){
+  return this.db.hkeys("~users");
+}
+Auth.prototype.getUser=function(access_token){
+  return this.db.hget("~accessTokens",access_token);
+}
+Auth.prototype.addUser=function(username,password,userId,appName){
+  return this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
+}
+Auth.prototype.authorize=function(username,password){
+  var self=this;
+  return this.db.hget("~users",username).then(function(res){
+    if(res){
+      var json=JSON.parse(res);
+      if(password==json.password){
+        delete json.password;
+        return self.db.hget("~userTokens",userId).then(function(accessToken){
+          json.accessToken=accessToken;
+          return Promise.resolve(json);
+        });
+      }
+      else{
+        Promise.reject(1);
+      }
+    }
+    else{
+      return Promise.reject(0);
+    }
+  });
+}
+Auth.prototype.addToken=function(userId,token){
+  var self=this;
+  return this.db.hset("~accessTokens",token,userId).then(function(){
+      return self.db.hset("~userTokens",userId,token);
+    });
+  
 }
 Auth.prototype.exit=function(){
   this.db.quit();
@@ -58,10 +101,13 @@ Cache.prototype.exit=function(){
   //close redis connection
   this.db.quit();
 }
+Cache.prototype.bucketList=function(userId){
+  return this.db.smembers(bucketsKey(userId));
+}
 Cache.prototype.bucketCount=function(userId,bucketName){
   return this.db.hlen(versionsKey(userId,bucketName)).then(function(itemCount){
     return Promise.resolve([bucketName,itemCount])
-    });
+  });
 }
 Cache.prototype.objectGet=function(userId,bucketName,objectId,objectVersion){
   return this.db.get(itemKey(userId,bucketName,objectId,objectVersion)).then(function(response){
@@ -256,6 +302,7 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
         }
         self.db.exec().then(function(){
           console.log("Successfully cached "+res.length+" items in "+bucketName);
+          self.db.sadd(bucketsKey(userId),bucketName);
           fulfill(res.length);
         },function(error){
           console.log("Problem with caching"+error);
@@ -263,6 +310,7 @@ Cache.prototype.cacheIndex=function(userId,bucketName,bucketIndex,overwrite){
         });
       } else{
         console.log(bucketName+" is empty, nothing cached.");
+        self.db.sadd(bucketsKey(userId),bucketName);
         fulfill(0);
       }
     },function(error){
@@ -483,7 +531,12 @@ Connection.prototype.exit=function(){
   this.rd.quit();
 }
 */
-
+function bucketsKey(userId){
+  /* 
+    set with all the bucket names of the corresponding user
+    */
+  return userId+"~buckets";
+}
 function itemKey(userId,bucketName,itemId,objectVersion){
   /* Objects are stored as simple strings in the format
     userid-bucketName-itemId which is always current, and 

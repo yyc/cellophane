@@ -13,7 +13,6 @@ module.exports = {
   , getUserById: getUserById
   , getUserByToken: getUserByToken
 }
-var simperium=require("./simperium");
 var authenticatedUsers={};
 var user2id={};
 var token2users={};
@@ -25,7 +24,7 @@ var request=rp.defaults({
 function authorize(apiKey,appName,username,password){
   return new Promise(function(fulfill,reject){
     if(authenticatedUsers[user2id[username]]){
-      reject(authenticatedUsers[user2id[username]]);
+      fulfill(user2id[username]);
     } else{
       var user=new User();
       user.username=username;
@@ -40,7 +39,7 @@ function authorize(apiKey,appName,username,password){
           user.accessToken=response.access_token;
           user2id[username]=response.userid;
           token2users[response.access_token]=response.userid;
-          return user.bucketList(user);
+          return user.bucketList();
           }
         ,function(error){
           reject(error);
@@ -83,16 +82,16 @@ function User(){
   var buckets;
   var bucketList;
 }
-User.prototype.bucketList=function(user){
+User.prototype.bucketList=function(){
+  self=this;
   return new Promise(function(fulfill,reject){
-    user.buckets={};
     request.get({
-        url: "https://api.simperium.com/1/"+this.appName+"/buckets",
-        headers: {"x-simperium-token":user.accessToken}
+        url: "https://api.simperium.com/1/"+self.appName+"/buckets",
+        headers: {"x-simperium-token":self.accessToken}
     }).then(function(json){
-        this.buckets={};
+        self.buckets={};
         for(i=0;i<json.buckets.length;i++){
-          user.getBucket(json.buckets[i].name.toLowerCase());
+          self.getBucket(json.buckets[i].name.toLowerCase());
         }
         fulfill(json);
       },function(error){
