@@ -35,7 +35,7 @@
             }
           }
         });
-        socket.on("error",function(message){
+        socket.on("problem",function(message){
           $("#console").append($("<li>").text(message).addClass("error"));
         });
       });

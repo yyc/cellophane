@@ -35,6 +35,9 @@ Auth.prototype.getUser=function(access_token){
 Auth.prototype.addUser=function(username,password,userId,appName){
   return this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
 }
+Auth.prototype.removeUser=function(userId){
+  
+  }
 Auth.prototype.getToken=function(userId){
   
 }

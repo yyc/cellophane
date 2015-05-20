@@ -35,9 +35,6 @@ if(process.env.OPTIONS){
   merge(defaultOptions,JSON.parse(process.env.OPTIONS));
 }
 var options={};
-var captureTokens={};
-var activeUsers={};
-var activeApps={};
 merge(options,defaultOptions);
 var notFound="<html><title>404: Not Found</title><body>404: Not Found</body></html>";
 
@@ -49,7 +46,7 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
   req.action=req.params.method;
   if(req.headers['x-simperium-token']){
     //This route should only match the api.simperium.com/1/appName/buckets method
-    if(captureTokens[req.headers['x-simperium-token']]){
+    if(req.user=simperium.getUserByToken(req.headers['x-simperium-token'])){
       next();
     }
     else{
@@ -77,43 +74,28 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
     next();
   }
 }).all(function(req,res,next){
-  if(req.headers["x-simperium-token"]){
-    //capture
-     var user=simperium.getUserByToken(req.headers["x-simperium-token"],captureTokens[req.headers["x-simperium-token"]]);
-    if(user){
-      array=[];
-      for(var key in user.buckets){
-        array.push({name:key});
-      }
-      res.end(JSON.stringify({buckets:array}));
-    }else{
-      user = simperium.init(req.appName,captureTokens[req.headers['x-simperium-token']],req.headers['x-simperium-token']);
-      user.bucketList().then(function(response){
-          res.end(JSON.stringify(response));
-        },function(error){
-          res.end(error);
-          console.log(95,error);
-      });
+  if(req.user){
+    array=[];
+    for(var key in req.user.buckets){
+      array.push({name:key});
     }
+    res.end(JSON.stringify({buckets:array}));
   }
   else{
     next();
   }
   }).get(function(req,res,next){
     log("GET request detected");
-    if(req.action=="buckets"){
-      
-    }
     next();
 }).post(function(req,res,next){
   //Only authorize is of any interest, we can let the rest through without parsing
   if(req.action=="authorize"){
-    responseString="";
+    var responseString="";
     req.on("data",function(data){
       responseString+=data;
     }).on("end",function(){
       var json=JSON.parse(responseString);
-      authOptions={
+      var authOptions={
         username: json.username
         ,password: json.password
         ,appName: req.appName
@@ -121,7 +103,13 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
       if(req.headers['x-simperium-api-key']){
         authOptions['apiKey']=req.headers['x-simperium-api-key'];
       }
-      if(!activeUsers[authOptions.username]){
+      if(req.user=simperium.getUserByUsername(authOptions.username)){
+        res.end(JSON.stringify({
+            username:req.user.username,
+            access_token: req.user.accessToken,
+            userid: req.user.userId
+        }));
+      }else{
         //Passthrough manually because data is already read
         var options = {
           hostname: "auth.simperium.com",
@@ -140,18 +128,6 @@ app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
           });
         });
         remote.end(JSON.stringify(authOptions));
-      }else{
-        authorizeUser(authOptions).then(function(user){
-          response=JSON.stringify({
-            username:user.username,
-            access_token: user.accessToken,
-            userid: user.userId
-          });
-          res.end(response);
-        },function(error){
-            res.statusCode=400;
-            res.end(error)
-        });
       }
     });
   }
@@ -178,23 +154,29 @@ var apiAll=function(req,res,next){
     res.statusMessage = "Unauthorized";
     res.end("401 Unauthorized: Missing Token");
   }else{
-    authd.getUser(req.headers['x-simperium-token']).then(function(userId){
-      if(userId){
-        req.user=simperium.getUserByToken(userId);
-        if(!req.user){
-          req.user = simperium.init(req.appName,userId,req.headers['x-simperium-token']);
+    if(req.user=simperium.getUserByToken(req.headers["x-simperium-token"])){
+      next();
+    }
+    else{
+      authd.getUser(req.headers['x-simperium-token']).then(function(userId){
+        if(userId){
+          req.user=simperium.getUserByToken(userId);
+          if(!req.user){
+            req.user = simperium.init(req.appName,userId,req.headers['x-simperium-token']);
+          }
+          next();
         }
-      }
-      else{
-        var options = {
-          hostname: "api.simperium.com",
-          path: req.url,
-          method: req.method || "GET",
-          headers: {"x-simperium-token":req.headers['x-simperium-token']}
-        };
-        passthrough(options,req,res);
-      }
-    })
+        else{//Access Token doesn't exist in the database, so we pass it through
+          var options = {
+            hostname: "api.simperium.com",
+            path: req.url,
+            method: req.method || "GET",
+            headers: {"x-simperium-token":req.headers['x-simperium-token']}
+          };
+          passthrough(options,req,res);
+        }
+      })
+    }
   }
 }
 var objectAll=function(req,res,next){
@@ -407,8 +389,6 @@ app.route("/admin/test").all(function(req,res,next){
   });
 });
 
-
-
 app.route("/admin").all(function(req,res,next){
   next();
 }).get(function(req,res,next){
@@ -445,12 +425,14 @@ io.on('connection',function(socket){
         ,apiKey:apiKey
       }).then(function(user){
         socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
+/*
         captureTokens[user.accessToken]=user.userId;
         activeUsers[username]=user.userId;
         activeApps[appName]=1;
+*/
         authd.addApp(appName);
         interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
-        authd.addUser(username,password,user.userId);
+        authd.addUser(username,password,user.userId,appName);
         for(var key in user.buckets){
           cache.bucketCount(user.userId,key).then(function(res){
             console.log(user.userId,res[0],res[1]);
@@ -466,7 +448,7 @@ io.on('connection',function(socket){
         Promise.all(ary).then(function(response){
           socket.emit("reply","Buckets cached");
         },function(error){
-          socket.emit("error","Buckets couldn't be cached");
+          socket.emit("problem","Buckets couldn't be cached");
           log(error);
         });
 */
@@ -482,7 +464,7 @@ io.on('connection',function(socket){
         cache.db.send("FLUSHDB").then(function(success){
           socket.emit("reply","Store successfully flushed "+success);
         },function(error){
-          socket.emit("error","couldn't flush store"+error);
+          socket.emit("problem","couldn't flush store"+error);
         });
       break;
       case "list":
@@ -490,14 +472,14 @@ io.on('connection',function(socket){
           socket.emit("reply","Keys follow");
           socket.emit("listing",response);
         },function(error){
-          socket.emit("error","couldn't get listing store"+error);
+          socket.emit("problem","couldn't get listing store"+error);
         });      
       break;
       case "get":
         cache.db.get(payload[1]).then(function(response){
           socket.emit("reply",response);
         },function(error){
-          socket.emit("error","couldn't fetch. "+error);
+          socket.emit("problem","couldn't fetch. "+error);
         })
       break;
       default:
@@ -505,7 +487,7 @@ io.on('connection',function(socket){
           socket.emit("reply","Response as follows ");
           socket.emit("listing",response);
         },function(error){
-          socket.emit("error","couldn't flush store"+error);
+          socket.emit("problem","couldn't flush store"+error);
         })
       break;
     }
@@ -514,11 +496,11 @@ io.on('connection',function(socket){
     if(payload.length==2){
       accessToken=payload[0];
       username=payload[1];
-      if(activeUsers[username]){
-        captureTokens[accessToken]=activeUsers[username];
-        socket.emit("reply","Successfully associated token "+accessToken+" with user "+username+" (userid "+activeUsers[username]+")");
+      if(user=simperium.getUserByUsername(username)){
+        user.addToken(accessToken);
+        socket.emit("reply","Successfully associated token "+accessToken+" with user "+username+" (userid "+user.userId+")");
       }else{
-                socket.emit("error","Username not found! Please use the add <username> <password> command first");
+                socket.emit("problem","Username not found! Please use the add <username> <password> command first");
       }
     }
   });
@@ -542,10 +524,10 @@ io.on('connection',function(socket){
             socket.emit()
             socket.emit("reply","Set "+payload[1]+" to default value of "+defaultOptions[payload[1]]);
           }else{
-            socket.emit("error",payload[1]+"requires a value");
+            socket.emit("problem",payload[1]+"requires a value");
           }
         }else{
-          socket.emit("error","option set requires a key");
+          socket.emit("problem","option set requires a key");
         }
       break;
       case "delete":
@@ -557,11 +539,11 @@ io.on('connection',function(socket){
               socket.emit("reply",payload[1]+" => "+options[payload[1]]+"deleted");
               delete options[payload[1]];
             }else{
-              socket.emit("error",payload[1]+" does not exist");
+              socket.emit("problem",payload[1]+" does not exist");
             }
           }
         }else{
-          socket.emit("error","option delete requires a key (use reset to delete all)");
+          socket.emit("problem","option delete requires a key (use reset to delete all)");
         }
       break;
       case "list":
@@ -580,16 +562,8 @@ io.on('connection',function(socket){
   });
   socket.on("delete",function(payload){
     if(payload[0]){
-      if(activeUsers[payload[0]]){
-        userId=activeUsers[payload[0]];
-        delete activeUsers[payload[0]];
-        for(var key in captureTokens){
-          if(captureTokens[key]==userId){
-            simperium.removeToken(captureTokens[key]);
-            delete captureTokens[key];
-          }
-        }
-        simperium.removeUser(userId);
+      if(user=simperium.getUserByUsername(payload[0])){
+        user.remove();
         emit("reply","removed user "+payload[0]);
       } else{
         emit("error","user not found");
@@ -606,37 +580,36 @@ io.on('connection',function(socket){
         //don't overwrite
       }
     }else{
-      socket.emit("error","upsync requires options");
+      socket.emit("problem","upsync requires options");
     }
   });
   socket.on("downsync",function(payload){
     if(payload[0]){
-      if(activeUsers[payload[0]]){
-        userId=activeUsers[payload[0]];
-        var user=simperium.getUserById(userId);
-        if(user){
-          bucketPromises=[];
-          buckets=user.buckets;
-          for(var key in buckets){
-            bucketPromises.push(cacheBucket(userId,key,(payload[1]=="--overwrite")));
-          }
+      var user;
+      if(user=simperium.getUserByUsername(payload[0])){
+        var bucketPromises=[];
+        user.bucketList().then(function(buckets){
+          console.log(buckets);
+          buckets.buckets.forEach(function(val){
+            console.log(user.userId,val['name']);
+            bucketPromises.push(cacheBucket(user.userId,val['name'],(payload[1]=="--overwrite")));
+          });
           Promise.all(bucketPromises).then(function(){
             socket.emit("reply","Downsync complete");
-          })
-        }
-        else{
-          socket.emit("error","user not recognized (add user first?)");
-        }
+          });
+        });
       } else{
-        socket.emit("error","user not recognized (add user first?)");
+        socket.emit("problem","user not recognized (add user first?)");
       }
     }else{
-      socket.emit("error","downsync requires options");
+      socket.emit("problem","downsync requires options");
     }
   });//incomplete
     
   log("io connection detected");
 })
+
+
 
 //SocketJS to handle WebSocket API calls
 var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
@@ -674,16 +647,15 @@ interceptor.on('connection', function(conn) {
               //authenticate and select bucket
               var json=JSON.parse(data);
               json.name=json.name.toLowerCase();
-              if(captureTokens[json.token]){
-                user = captureTokens[json.token];
+              if(user=simperium.getUserByToken(json.token)){
                 clientId=json.clientid
-                conn.write(heads[0]+":auth:"+simperium.getUserById(user).username);
+                conn.write(heads[0]+":auth:"+user.username);
                 if(isNaN(channel)){
                   channel=channels.length;
                 }
                 //send index
-                channels[channel]=cache.addBucket(user,json.name);
-                if(typeOf(simperium.getUserById(user).getBucket(json.name).itemCount)=="number"){
+                channels[channel]=cache.addBucket(user.userId,json.name);
+                if(typeOf(user.getBucket(json.name).itemCount)=="number"){
                   channels[channel].getIndex({limit:100,data:true}).then(function(response){
                     conn.write(channel+':'+'i:'+JSON.stringify({
                       index:response[0]
@@ -716,14 +688,14 @@ interceptor.on('connection', function(conn) {
                         //cache data
                         response=JSON.parse(data);
                         channels[channel].cacheIndex(response.index,false).then(function(indexCount){
-                        oldCount=parseInt(simperium.getUserById(user).getBucket(json.name).itemCount)||0;
+                        oldCount=parseInt(user.getBucket(json.name).itemCount)||0;
                         if(!response.mark){
                           console.log("Cache complete, stored "+indexCount+" items");
-                          simperium.getUserById(user).getBucket(json.name).itemCount=oldCount+indexCount;
+                          user.getBucket(json.name).itemCount=oldCount+indexCount;
                         }
                         else{
                           console.log("Cache incomplete, stored "+indexCount+" items");
-                          simperium.getUserById(user).getBucket(json.name).itemCount=""+(oldCount+indexCount);
+                          user.getBucket(json.name).itemCount=""+(oldCount+indexCount);
                         }
                         conn.write(channel+':'+'i:'+data);
                         },function(error){
@@ -755,7 +727,7 @@ interceptor.on('connection', function(conn) {
             break;
             case "i":
               //post index
-              if(typeOf(simperium.getUserById(user).getBucket(channels[channel].bucketName).itemCount)=="number"){
+              if(typeOf(user.getBucket(channels[channel].bucketName).itemCount)=="number"){
                 query=data.split(":");
                 var mark=parseInt(query[1]);
                 var limit=query[query.length] || 100;
@@ -912,10 +884,18 @@ authd.getApps().then(function(res){
       var user;
       authd.getToken(json.userId).then(function(accessToken){
         user=simperium.init(json.appName,json.userId,accessToken);
+        user.addAuth(key);
         return cache.bucketList(json.userId);
       }).then(function(bucketList){
-        console.log(bucketList);
         user.bucketList(bucketList);
+        bucketCounts=[];
+        bucketList.forEach(function(bucket){
+          bucketCounts.push(cache.bucketCount(user.userId,bucket).then(function(count){
+            user.getBucket(bucket).itemCount=count[1];
+            return Promise.resolve(count);
+          }));
+          return Promise.all(bucketCounts)
+        });
       });
     });
   }
@@ -983,13 +963,13 @@ function authorizeUser(options){
   return new Promise(function(fulfill,reject){
     var apiKey = options.apiKey || simperiumApiKey;
     var appName = options.appName || simperiumAppName;
+    var user;
     if(options.username){
-      if(activeUsers[options.username]){
-        user=simperium.getUserById(activeUsers[options.username]);
+      if(user=simperium.getUserByUsername(options.username)){
         if(user){
           fulfill(user);
         } else{
-          log("user is null for some reason",activeUsers);
+          log("user is null for some reason");
           simperium.authorize(apiKey,appName,options.username,options.password)
           .then(function(user){
             authd.addUser(user.userName,user.password,user.userId,appName);
@@ -1073,9 +1053,6 @@ function testData(downsync){
       ,appName:simperiumAppName
       ,apiKey:simperiumApiKey
     }).then(function(user){
-      accessToken=user.accessToken
-      captureTokens[accessToken]=user.userId;
-      activeUsers[testUsername]=user.userId;
       if(downsync!="false"&&downsync!=false){
         for(var key in user.buckets){
           ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));

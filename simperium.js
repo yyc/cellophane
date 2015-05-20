@@ -12,10 +12,11 @@ module.exports = {
   , bucket: Bucket
   , getUserById: getUserById
   , getUserByToken: getUserByToken
+  , getUserByUsername: getUserByUsername
 }
-var authenticatedUsers={};
-var user2id={};
-var token2users={};
+var authenticatedUsers={};//userId:user
+var user2id={};//username:userId
+var token2users={};//accessToken:userid
 var request=rp.defaults({
   port:443
   , json:true
@@ -72,7 +73,28 @@ function init(appName,userId,accessToken){
   user.userId=userId;
   user.accessToken=accessToken;
   authenticatedUsers[userId]=user;
+  token2users[accessToken]=userId;
   return authenticatedUsers[userId];
+}
+function getUserByToken(accessToken,userId){
+  if(authenticatedUsers[token2users[accessToken]]){
+    return authenticatedUsers[token2users[accessToken]];
+  } else if(userId){
+    token2users[accessToken]=userId;
+    if(authenticatedUsers[userId]){
+      return authenticatedUsers[userId];
+    } else{
+      return false;
+    }
+  } else{
+    return false;
+  }
+}
+function getUserById(userId,appName,accessToken){
+    return authenticatedUsers[userId];
+}
+function getUserByUsername(userName){
+    return authenticatedUsers[user2id[userName]];
 }
 function User(){
   var apiKey;
@@ -81,6 +103,14 @@ function User(){
   var accessToken;
   var buckets;
 }
+User.prototype.addToken=function(accessToken){
+  token2users[accessToken]=this.userId;
+}
+User.prototype.addAuth=function(username){
+  this.username=username;
+  user2id[username]=this.userId;
+}
+
 User.prototype.bucketList=function(buckets){
   self=this;
   if(buckets){
@@ -117,25 +147,8 @@ User.prototype.getBucket=function(bucketName){
     return this.buckets[bucketName];
   }
 }
-function getUserByToken(accessToken,userId){
-  if(authenticatedUsers[token2users[accessToken]]){
-    return authenticatedUsers[token2users[accessToken]];
-  } else if(userId){
-    token2users[accessToken]=userId;
-    if(authenticatedUsers[userId]){
-      return authenticatedUsers[userId];
-    } else{
-      return false;
-    }
-  } else{
-    return false;
-  }
-}
-function getUserById(userId,appName,accessToken){
-    return authenticatedUsers[userId];
-}
-function getUserByName(userName){
-    return authenticatedUsers[user2Id[userId]];
+User.prototype.remove=function(){
+  removeUser(this.userId);
 }
 function Bucket(){
   var bucketName;
