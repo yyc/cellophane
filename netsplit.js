@@ -3,7 +3,7 @@
 var http=require("http");
 var sockjs = require('sockjs');
 var sockClient = require('sockjs-client');
-var ws=require("ws");
+var WebSocket=require("ws");
 
 var splitter=sockjs.createServer({sockjs_url:'https://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
 
@@ -17,29 +17,36 @@ var options = {
     rejectUnauthorized: false
 };
 */
-console.log(sockClient);
 splitter.on("connection",function(conn){
-  var simperium=new sockClient("https://api.simperium.com/sock/1/"+appName);
-  simperium.onopen=function(){
-    console.log(simperium);
+  var simperium=new WebSocket("https://api.simperium.com/sock/1/"+appName+"/websocket");
+  var SmessageQueue=[];
+  var CmessageQueue=[];
+  simperium.on("open",function(){
     console.log("Simperium connection opened");
-  }
-  simperium.onmessage=function(message){
+    while(message=SmessageQueue.pop()){
+      simperium.send(message);
+      console.log("Sending queued simp message",message);
+    }
+  });
+  simperium.on("message",function(message){
     console.log("simperium",message);
     conn.write(message);
-  }
-  simperium.onclose=function(ev){
-    console.log(simperium,ev);
+  });
+  simperium.on("close",function(ev){
     console.log("Simperium connection closed");
     conn.close();
     cellophane.close();
-  }
+  });
   var cellophane=new sockClient("https://localhost:5000/sock/1/"+appName);
   cellophane.onopen=function(){
     console.log("cellophane connection opened");
+    while(message=CmessageQueue.pop()){
+      cellophane.send(message);
+      console.log("Sending queued cell message",message);
+    }
   }
   cellophane.onmessage=function(message){
-    console.log("cellophane",message,"(discarded)");
+    console.log("cellophane",message.data,"(discarded)");
   }
   cellophane.onclose=function(){
     console.log("cellophane connection closed");
@@ -48,8 +55,18 @@ splitter.on("connection",function(conn){
   }
   conn.on("data",function(message){
     console.log("client",message);
-    simperium.send(message);
-    cellophane.send(message);
+    try{
+      simperium.send(message);
+    }catch(err){
+      console.log("Error sending message to simperium",err)
+    }
+    try{
+      cellophane.send(message);
+    }catch(err){
+      console.log("Error sending message to cellophane",err)
+      SmessageQueue.push(message);
+      CmessageQueue.push(message);
+    }
   });
   conn.on("close",function(){
     console.log("Client connection closed");
@@ -61,9 +78,9 @@ splitter.on("connection",function(conn){
 //var server=https.createServer(options);
 var server=http.createServer();
 splitter.installHandlers(server,{prefix:"/sock/1/"+appName});
-server.listen(8000,function(){
+server.listen(6000,function(){
   //testing
-  var test=new sockClient("https://localhost:8000/sock/1/"+appName);
+  var test=new sockClient("https://localhost:6000/sock/1/"+appName);
   test.onopen=function(){
     console.log("Test connection opened");
   }  
