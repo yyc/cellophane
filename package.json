@@ -13,8 +13,10 @@
     "object-store": "git://github.com/TinkerTanker/object-store",
     "socket.io": "1.3.x",
     "sockjs": "^0.3.15",
+    "sockjs-client": "^1.0.0",
     "sockjs-client-node": "^0.2.1",
-    "then-redis": "git://github.com/yyc/then-redis"
+    "then-redis": "git://github.com/yyc/then-redis",
+    "ws": "^0.7.2"
   },
   "engines": {
     "node": "0.12.x"

@@ -669,7 +669,7 @@ interceptor.on('connection', function(conn) {
                   });
                 }else{
                   if(!remote||remote.readyState==0){
-                    remote = new sockClient('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
+                    remote = new sockClient ('https://api.simperium.com/sock/1/'+conn.url.split('/')[3]+"/");
                     intercept=false;
                     remoteMessageQueue.push(message);
                     remote.onopen=function(){
