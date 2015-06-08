@@ -53,7 +53,7 @@ splitter.on("connection",function(conn){
   }
   cellophane.onmessage=function(message){
     if(cellophane){
-      conn.write(message);
+      conn.write(message.data);
       console.log("cellophane",message.data);
     }
     else{
