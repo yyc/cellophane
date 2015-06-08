@@ -30,10 +30,13 @@ splitter.on("connection",function(conn){
     }
   });
   simperium.on("message",function(message){
-    console.log("simperium",message);
     if(!cellophane){
+      console.log("simperium",message);
       conn.write(message);
     }
+    else{
+      console.log("simperium",message.data,"(discarded)");
+    }    
   });
   simperium.on("close",function(ev){
     console.log("Simperium connection closed");
@@ -51,8 +54,11 @@ splitter.on("connection",function(conn){
   cellophane.onmessage=function(message){
     if(cellophane){
       conn.write(message);
+      console.log("cellophane",message.data);
     }
-    console.log("cellophane",message.data,"(discarded)");
+    else{
+      console.log("cellophane",message.data,"(discarded)");
+    }
   }
   cellophane.onclose=function(){
     console.log("cellophane connection closed");
