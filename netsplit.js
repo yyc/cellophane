@@ -8,6 +8,7 @@ var WebSocket=require("ws");
 var splitter=sockjs.createServer({sockjs_url:'https://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
 
 var appName=process.argv[2]||"photo-wages-1b6";
+var cellophane=process.argv[3]||0;
 /*
 
 var options = {
@@ -30,7 +31,9 @@ splitter.on("connection",function(conn){
   });
   simperium.on("message",function(message){
     console.log("simperium",message);
-    conn.write(message);
+    if(!cellophane){
+      conn.write(message);
+    }
   });
   simperium.on("close",function(ev){
     console.log("Simperium connection closed");
@@ -46,6 +49,9 @@ splitter.on("connection",function(conn){
     }
   }
   cellophane.onmessage=function(message){
+    if(cellophane){
+      conn.write(message);
+    }
     console.log("cellophane",message.data,"(discarded)");
   }
   cellophane.onclose=function(){
