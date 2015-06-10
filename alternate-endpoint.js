@@ -21,7 +21,7 @@ var simperium=require("./simperium");
 var cachejs=require("./cache");
 cache=new cachejs.Cache();
 var authd=new cachejs.Auth();
-var merge=require("./merge_recursively");
+var merge=require("./lib/merge_recursively");
 
 //Load default configurations
 var configs=require("./config.js");

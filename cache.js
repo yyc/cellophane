@@ -1,6 +1,6 @@
-var json_diff=require("./jsondiff-node");
+var json_diff=require("./lib/jsondiff-node");
 var jd= new json_diff();
-var merge=require("./merge_recursively");
+var merge=require("./lib/merge_recursively");
 var EventEmitter=require("events").EventEmitter;
 var util=require("util");
 var redis=require("then-redis");

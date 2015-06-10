@@ -1,7 +1,7 @@
 var https=require("https");
 var querystring=require("querystring");
 var rp=require("request-promise");
-var merge=require("./merge_recursively");
+var merge=require("./lib/merge_recursively");
 
 module.exports = {
   authorize: authorize
