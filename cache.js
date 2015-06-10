@@ -37,7 +37,7 @@ Auth.prototype.addUser=function(username,password,userId,appName){
 }
 Auth.prototype.removeUser=function(userId){
   
-  }
+}
 Auth.prototype.getToken=function(userId){
   
 }

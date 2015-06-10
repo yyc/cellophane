@@ -21,7 +21,7 @@
   "engines": {
     "node": "0.12.x"
   },
-  "main": "transparent-wrapper.js",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "test": "mocha"
