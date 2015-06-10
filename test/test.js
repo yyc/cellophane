@@ -1,4 +1,3 @@
-//process.env.NODE_ENV = 'test';
 var mocha = require('mocha');
 var chai = require('chai');
 var should=chai.should();
@@ -16,7 +15,7 @@ var testUsername=configs.username;
 var testPassword=configs.password;
 var testObject=configs.testObject;
 
-var localHost="http://localhost:5000";
+var localHost="http://localhost:"+process.env.port;
 
 before(function(done){    
   rp.get(localHost+"/admin")

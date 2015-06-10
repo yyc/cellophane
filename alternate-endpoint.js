@@ -29,7 +29,7 @@ var simperiumAppName =configs.appName;
 var simperiumApiKey = configs.apiKey;
 var testUsername=configs.username;
 var testPassword=configs.password;
-var port = configs.port;
+var port = process.env.port;
 var defaultOptions=configs.options;
 if(process.env.OPTIONS){
   merge(defaultOptions,JSON.parse(process.env.OPTIONS));
@@ -425,11 +425,6 @@ io.on('connection',function(socket){
         ,apiKey:apiKey
       }).then(function(user){
         socket.emit("reply","user created and authorized: (token "+user.accessToken+")");
-/*
-        captureTokens[user.accessToken]=user.userId;
-        activeUsers[username]=user.userId;
-        activeApps[appName]=1;
-*/
         authd.addApp(appName);
         interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
         authd.addUser(username,password,user.userId,appName);
