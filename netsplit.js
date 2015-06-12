@@ -18,6 +18,18 @@ var options = {
     rejectUnauthorized: false
 };
 */
+
+if(cellophane=="false"||cellophane=="0"){
+  cellophane=false;
+}
+
+if(cellophane){
+  console.log("Using cellophane as main channel with Simperium as backup");
+}
+else{
+  console.log("Using Simperium as main channel with Cellophane as backup");
+}
+
 splitter.on("connection",function(conn){
   var simperium=new WebSocket("https://api.simperium.com/sock/1/"+appName+"/websocket");
   var SmessageQueue=[];
@@ -35,7 +47,7 @@ splitter.on("connection",function(conn){
       conn.write(message);
     }
     else{
-      console.log("simperium",message.data,"(discarded)");
+      console.log("simperium",message,"(discarded)");
     }    
   });
   simperium.on("close",function(ev){
