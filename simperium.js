@@ -46,7 +46,7 @@ function authorize(apiKey,appName,username,password){
           reject(error);
       }).then(function(){
           authenticatedUsers[user.userId]=user;
-          fulfill(authenticatedUsers[user.userId]);
+          fulfill(user);
         },function(error){
           reject(error);
         });

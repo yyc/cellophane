@@ -12,8 +12,8 @@ module.exports={
   Bucket:Bucket
   };
 
-function Auth(){
-  this.db=redis.createClient();
+function Auth(redisOptions){
+  this.db=redis.createClient(redisOptions);
 }
 Auth.prototype.getApps=function(){
   return this.db.smembers("~apps");
@@ -75,10 +75,28 @@ Auth.prototype.exit=function(){
   this.db.quit();
 }
 
-function Cache(clientid){
-  this.clientid=clientid || "cellodaemon";
+function Cache(options){
   this.eventMessages={};
-  this.db=redis.createClient();  
+  if(options){
+    this.clientid=options.clientid || "cellodaemon";
+    if(options.redisOptions){
+      this.db=redis.createClient(options.redisOptions);
+      this.redisOptions=options.redisOptions;
+    }
+    else{
+      this.db=redis.createClient();
+    }
+  }
+  else if(typeof options=="string"){
+    console.log("Deprecated method, don't call Cache constructor with the clientid");
+    this.clientid=options || "cellodaemon";
+    this.db=redis.createClient();
+  }
+  else{
+    console.log("Using default values for Cache constructor");
+    this.clientid="cellodaemon";
+    this.db=redis.createClient();
+  }
 };
 if (process.env.REDISTOGO_URL) {
   var rtg = require("url").parse(process.env.REDISTOGO_URL);
@@ -399,7 +417,7 @@ Cache.prototype.getIndex=function(userId,bucketName,options){
   });
 }
 Cache.prototype.addBucket=function(userId,bucketName){
-  return new Bucket(userId,bucketName);
+  return new Bucket(userId,bucketName,this.redisOptions);
 }
 Cache.prototype.getChanges=function(userId,bucketName,current,returnEmpty){
   return new Promise(function(fulfill,reject){
@@ -421,14 +439,14 @@ Cache.prototype.getChanges=function(userId,bucketName,current,returnEmpty){
   });  
 }
 
-function Bucket(uid,bucket){
+function Bucket(uid,bucket,redisOptions){
   EventEmitter.call(this);
   self=this;
   this.userId=uid;
   this.bucketName=bucket;
   this.cache=new Cache();
   this.cache.db.send("CLIENT",['SETNAME',bucket]);
-  this.subscriber=redis.createClient();
+  this.subscriber=redis.createClient(redisOptions);
   this.subscriber._parent=this;
   this.subscriber.on("message",function(channel,message){
     this._parent.emit("message",message);

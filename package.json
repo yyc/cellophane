@@ -9,6 +9,7 @@
     "commander": "^2.8.1",
     "diff-match-patch": "^1.0.0",
     "express": "4.12.x",
+    "forever-monitor": "^1.5.2",
     "merge": "git://github.com/Tinkertanker/js.merge",
     "node-uuid": "^1.4.3",
     "object-store": "git://github.com/TinkerTanker/object-store",

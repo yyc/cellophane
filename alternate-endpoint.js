@@ -1,9 +1,13 @@
+//Should only be spawned from index.js
+if(!process.send){
+  console.log("This vile nodespawn should not be run on its own. Run 'node index.js' instead.");
+  process.exit();
+}
+
+
 //Load required libraries
 var express=require("express");
 var app=express();
-var router=express.Router();
-var http=require("http");
-var https=require("https");
 var httpListener=http.Server(app);
 var io=require("socket.io")(httpListener);
 var uuid=require("node-uuid");
