@@ -1,6 +1,6 @@
 var express=require("express");
 var https=require("https");
-var simperium=require("./simperium");
+var simperium;
 var cachejs=require("./cache");
 var Auth=require("./auth");
 
@@ -71,36 +71,29 @@ module.exports=function(configs){
         if(req.headers['x-simperium-api-key']){
           authOptions['apiKey']=req.headers['x-simperium-api-key'];
         }
-        if(req.user=simperium.getUserByUsername(authOptions.username)){
+        authd.authorize(json.username,json.password,req.appName,req.headers['x-simperium-api-key']).then(function(user){
+          req.user=user;
+          authd.
           res.end(JSON.stringify({
               username:req.user.username,
               access_token: req.user.accessToken,
               userid: req.user.userId
           }));
-        }else{
-          simperium.authorize(req.headers['x-simperium-api-key'],req.appName,json.username,json.password).then(function(user){
-            req.user=user;
-            authd.
-            res.end(JSON.stringify({
-                username:req.user.username,
-                access_token: req.user.accessToken,
-                userid: req.user.userId
-            }));
-          },function(error){
-            console.error("Authorize error",error);
-          })
-          remote=https.request(options,function(response){
-            res.statusCode=response.statusCode;
-            res.statusMessage=response.statusMessage;
-            response.on("data",function(data){
-              res.write(data);
-              resp
-            }).on("end",function(){
-              res.end();
-            });
+        },function(error){
+          console.error("Authorize error",error);
+        })
+        remote=https.request(options,function(response){
+          res.statusCode=response.statusCode;
+          res.statusMessage=response.statusMessage;
+          response.on("data",function(data){
+            res.write(data);
+            resp
+          }).on("end",function(){
+            res.end();
           });
-          remote.end(JSON.stringify(authOptions));
-        }
+        });
+        remote.end(JSON.stringify(authOptions));
+
       });
     }
     else{
@@ -362,7 +355,125 @@ module.exports=function(configs){
   app.route("/misc/*").get(function(req,res,next){
     res.sendFile(__dirname+"/misc/"+req.url.slice(6));
   })
- 
-    
   return app;
+}
+
+function authorizeUser(options){
+  return new Promise(function(fulfill,reject){
+    var apiKey = options.apiKey || simperiumApiKey;
+    var appName = options.appName || simperiumAppName;
+    var user;
+    if(options.username){
+      if(user=simperium.getUserByUsername(options.username)){
+        if(user){
+          fulfill(user);
+        } else{
+          log("user is null for some reason");
+          simperium.authorize(apiKey,appName,options.username,options.password)
+          .then(function(user){
+            authd.addUser(user.userName,user.password,user.userId,appName);
+            authd.addToken(user.userId,user.accessToken);
+            authd.addApp(appName);            
+            fulfill(user);
+          },function(error){
+            reject(error);
+          });
+        }
+      }
+      else{
+        console.log("No record found, checking redis..");
+        //Check redis, then only do actual authorization with Simperium as a last resort
+        authd.authorize(options.username,options.password).then(function(user){
+          fulfill(simperium.init(user.appName,user.userId,user.accessToken));
+        },function(rej){
+          if(rej==1){//Incorrect password
+            reject("Incorrect Username or Password");
+          }
+          else{
+            console.log("No redis auth records, querying Simperium..");
+            simperium.authorize(apiKey,appName,options.username,options.password)
+            .then(function(user){
+                authd.addUser(user.username,user.password,user.userId,appName);
+                authd.addToken(user.userId,user.accessToken);
+                authd.addApp(appName);            
+                fulfill(user);
+              },function(error){
+                reject(error);
+            });
+          }
+        });
+      }
+    } else{
+      reject("Missing username");
+    }
+  });
+}
+function itemKey(userId,bucketName,itemId){
+  return userId+"-"+bucketName+"-"+itemId+"";
+}
+function versionsKey(userId,bucketName){
+    return userId+"-"+bucketName+"~keys";
+}
+function ccidsKey(userId,bucketName){
+    return userId+"-"+bucketName+"~ccids";
+}
+function ccidKey(userId,bucketName,ccid){
+  return "ccid~"+ccid;
+}
+function currentKey(userId,bucketName){
+    return userId+"-"+bucketName+"~current";
+}
+function cacheBucket(userId,bucketName,overwrite){
+  return new Promise(function(fulfill,reject){
+    simperium.getUserById(userId).getBucket(bucketName).getAll()
+    .then(function(response){
+      response.mark=undefined;
+      return cache.cacheIndex(userId,bucketName,response,overwrite)
+    },function(error){
+      console.log("getall error",error);
+    })
+    .then(function(itemLength){
+      simperium.getUserById(userId).getBucket(bucketName).itemCount=itemLength;
+      fulfill();
+    },function(error){
+      log("cacheIndex error",error);
+      reject(error);
+    });
+  });
+}
+function testData(downsync){
+  return new Promise(function(fulfill,reject){
+    var ary=[];
+    cache.db.flushdb().then(function(res){
+      console.log("DB flushed",res);
+    })
+    authorizeUser({username:testUsername
+      ,password:testPassword
+      ,appName:simperiumAppName
+      ,apiKey:simperiumApiKey
+    }).then(function(user){
+      if(downsync!="false"&&downsync!=false){
+        for(var key in user.buckets){
+          ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
+        }
+      }
+      Promise.all(ary).then(function(response){
+        fulfill(user);
+      },function(error){
+        reject(error);
+        log(error);
+      });
+    });
+  });
+}
+function parseArray(array){
+  hash={};
+  for(i=0;i<array.length;i+=2){
+    val=parseInt(array[i+1]);
+    hash[array[i]]=isNaN(val)?array[i+1]:val;
+  }
+  return hash;
+}
+function typeOf(input) {
+	return ({}).toString.call(input).slice(8, -1).toLowerCase();
 }

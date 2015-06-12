@@ -68,12 +68,21 @@ function removeToken(accessToken){
   }
 }
 function init(appName,userId,accessToken){
-  var user=new User();
-  user.appName=appName;
-  user.userId=userId;
-  user.accessToken=accessToken;
-  authenticatedUsers[userId]=user;
-  token2users[accessToken]=userId;
+  var user;
+  if(typeof appName=="object"){
+    user=new User(appName);
+    if(appName.username&&appName.userId){
+      user2id[appName.username]=appName.userId;
+    }
+  }
+  else{
+    user=new User();
+    user.appName=appName;
+    user.userId=userId;
+    user.accessToken=accessToken;
+    authenticatedUsers[userId]=user;
+    token2users[accessToken]=userId;
+  }
   return authenticatedUsers[userId];
 }
 function getUserByToken(accessToken,userId){
@@ -96,12 +105,15 @@ function getUserById(userId,appName,accessToken){
 function getUserByUsername(userName){
     return authenticatedUsers[user2id[userName]];
 }
-function User(){
+function User(userObj){
   var apiKey;
   var appName;
   var userId;
   var accessToken;
   var buckets;
+  if(userObj){
+    merge(this,userObj);
+  }
 }
 User.prototype.addToken=function(accessToken){
   token2users[accessToken]=this.userId;

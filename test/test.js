@@ -15,7 +15,7 @@ var testUsername=configs.username;
 var testPassword=configs.password;
 var testObject=configs.testObject;
 
-var localHost="http://localhost:"+process.env.port;
+var localHost="http://localhost:5000";
 
 before(function(done){    
   rp.get(localHost+"/admin")

@@ -29,11 +29,30 @@ Auth.prototype.getUsers=function(namesonly){
     return this.db.hgetall("~users");
   }
 }
-Auth.prototype.getUser=function(access_token){
+Auth.prototype.getUserId=function(access_token){
   return this.db.hget("~accessTokens",access_token);
 }
+Auth.prototype.getUserById=function(userId){
+  return this.db.hget("~id2names",userId).then(function(username){
+    return this.db.hget("~users",username);
+  }).then(function(userText){
+    var user;
+    try{
+      user=JSON.parse(userText);
+    }
+    catch(e){
+      return Promise.reject(userText);
+    }
+    if(user){
+      return Promise.fulfil(user);
+    }
+  });
+}
 Auth.prototype.addUser=function(username,password,userId,appName){
-  return this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
+  this.db.multi();
+this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
+  this.db.hset("~id2names",userId,username);
+  return this.db.exec();
 }
 Auth.prototype.removeUser=function(userId){
   
@@ -47,7 +66,7 @@ Auth.prototype.authorize=function(username,password){
     if(res){
       var json=JSON.parse(res);
       if(password==json.password){
-        delete json.password;
+        json.username=username;
         return self.db.hget("~userTokens",userId).then(function(accessToken){
           json.accessToken=accessToken;
           return Promise.resolve(json);
@@ -71,7 +90,7 @@ Auth.prototype.addToken=function(userId,token){
 Auth.prototype.getToken=function(userId){
   return this.db.hget("~userTokens",userId);
 }
-Auth.prototype.exit=function(){
+Auth.prototype.quit=function(){
   this.db.quit();
 }
 
