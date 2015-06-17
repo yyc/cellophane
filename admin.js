@@ -61,6 +61,9 @@ process.on("message",function(message,httpListener){
           });
         }
       });
+      socket.on("init",function(payload){
+        username=payload[0];
+      });
       socket.on("store",function(payload){
         switch(payload[0]){
           case "flush":

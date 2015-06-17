@@ -3,6 +3,7 @@ var https=require("https");
 var simperium;
 var cachejs=require("./cache");
 var Auth=require("./auth");
+var uuid=require("node-uuid");
 
 module.exports=function(configs){
   var cache=new cachejs.Cache({redisOptions:configs.redisOptions});
@@ -14,25 +15,7 @@ module.exports=function(configs){
     req.action=req.params.method;
     if(req.headers['x-simperium-token']){
       //This route should only match the api.simperium.com/1/appName/buckets method
-      if(req.user=simperium.getUserByToken(req.headers['x-simperium-token'])){
-        next();
-      }
-      else{
-        authd.getUser(req.headers['x-simperium-token']).then(function(userId){
-          if(userid){
-            
-          }
-          else{
-            var options = {
-              hostname: "api.simperium.com",
-              path: req.url,
-              method: req.method || "GET",
-              headers: {"x-simperium-token":req.headers['x-simperium-token']}
-            };
-            passthrough(options,req,res);
-          }
-        });
-      } 
+      apiAll(req,res,next);
     }else if(req.action=="buckets"){
       res.statusCode=401;
       res.statusMessage = "Unauthorized";
@@ -63,37 +46,18 @@ module.exports=function(configs){
         authString+=data;
       }).on("end",function(){
         var json=JSON.parse(authString);
-        var authOptions={
-          username: json.username
-          ,password: json.password
-          ,appName: req.appName
-        };
-        if(req.headers['x-simperium-api-key']){
-          authOptions['apiKey']=req.headers['x-simperium-api-key'];
-        }
-        authd.authorize(json.username,json.password,req.appName,req.headers['x-simperium-api-key']).then(function(user){
-          req.user=user;
-          authd.
-          res.end(JSON.stringify({
-              username:req.user.username,
-              access_token: req.user.accessToken,
-              userid: req.user.userId
-          }));
-        },function(error){
-          console.error("Authorize error",error);
+        console.log(json);
+        authd.authorize(json.username,json.password,req.appName,req.headers['x-simperium-api-key'])
+        .then(function(user){
+            req.user=user;
+            res.end(JSON.stringify({
+                username:req.user.username,
+                access_token: req.user.accessToken,
+                userid: req.user.userId
+            }));
+          },function(error){
+            console.error("Authorize error",error);
         })
-        remote=https.request(options,function(response){
-          res.statusCode=response.statusCode;
-          res.statusMessage=response.statusMessage;
-          response.on("data",function(data){
-            res.write(data);
-            resp
-          }).on("end",function(){
-            res.end();
-          });
-        });
-        remote.end(JSON.stringify(authOptions));
-
       });
     }
     else{
@@ -122,29 +86,33 @@ module.exports=function(configs){
       res.statusMessage = "Unauthorized";
       res.end("401 Unauthorized: Missing Token");
     }else{
-      if(req.user=simperium.getUserByToken(req.headers["x-simperium-token"])){
-        next();
-      }
-      else{
-        authd.getUser(req.headers['x-simperium-token']).then(function(userId){
-          if(userId){
-            req.user=simperium.getUserByToken(userId);
-            if(!req.user){
-              req.user = simperium.init(req.appName,userId,req.headers['x-simperium-token']);
-            }
-            next();
+      authd.getUserByToken(req.headers["x-simperium-token"]).then(function(user){
+        if(user){
+          req.user=user;
+          if(req.params.bucket){
+            req
           }
-          else{//Access Token doesn't exist in the database, so we pass it through
-            var options = {
-              hostname: "api.simperium.com",
-              path: req.url,
-              method: req.method || "GET",
-              headers: {"x-simperium-token":req.headers['x-simperium-token']}
-            };
-            passthrough(options,req,res);
-          }
-        })
-      }
+          next();
+        }
+        else{
+          var options = {
+            hostname: "api.simperium.com",
+            path: req.url,
+            method: req.method || "GET",
+            headers: {"x-simperium-token":req.headers['x-simperium-token']}
+          };
+          passthrough(options,req,res);
+        }
+      },function(error){
+        console.log("ApiAll token resolution error",error);
+        var options = {
+          hostname: "api.simperium.com",
+          path: req.url,
+          method: req.method || "GET",
+          headers: {"x-simperium-token":req.headers['x-simperium-token']}
+        };
+        passthrough(options,req,res);
+      });
     }
   }
   var objectAll=function(req,res,next){
@@ -174,7 +142,7 @@ module.exports=function(configs){
         next();
       }
       else{
-         simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
+         authd.getUserById(req.user.userId).getBucket(req.params.bucket).itemRequest(req.params.object_id,req.method,req.params.version)
         .then(function(response){
           console.log(response.statusCode,response.json);
           res.statusCode=response.statusCode;
@@ -272,9 +240,8 @@ module.exports=function(configs){
     })
   }
   app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
-    if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
+    if(typeof req.user.itemCount=="number"){
       cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){
-        
         res.statusCode=200;
         res.end(JSON.stringify({
           index:response[0]
@@ -294,14 +261,14 @@ module.exports=function(configs){
       //Store everything in the cache
         if(options.data){
           cache.cacheIndex(req.user.userId,req.params.bucket,response.index,false).then(function(indexCount){
-            oldCount=parseInt(simperium.getUserById(user).getBucket(json.name).itemCount)||0;
+            oldCount=parseInt(req.user.getBucket(json.name).itemCount)||0;
             if(!response.mark){
               console.log("Cache complete, stored "+indexCount+" items");
-              simperium.getUserById(user).getBucket(json.name).itemCount=oldCount+indexCount;
+              req.user.getBucket(json.name).itemCount=oldCount+indexCount;
             }
             else{
               console.log("Cache incomplete, stored "+indexCount+" items");
-              simperium.getUserById(user).getBucket(json.name).itemCount=""+(oldCount+indexCount);
+              authd.getUserById(user).getBucket(json.name).itemCount=""+(oldCount+indexCount);
             }
             conn.write(channel+':'+'i:'+data);
           },function(error){
@@ -317,7 +284,8 @@ module.exports=function(configs){
     }
   });
   app.route("/1/:appName/:bucket/all").all(apiAll).get(function(req,res,next){
-    if(typeof simperium.getUserById(req.user.userId).getBucket(req.params.bucket).itemCount=="number"){
+    console.log(req.user.getBucket(req.params.bucket));
+    if(typeof req.user.getBucket(req.params.bucket).itemCount=="number"){
       cache.getChanges(req.user.userId,req.params.bucket,req.query.cv,false)
       .then(function(response){
         res.statusCode=200;
@@ -347,6 +315,14 @@ module.exports=function(configs){
   .post(readJsonBody).post(objectPost)
   .delete(objectPresent).delete(objectDel);
   
+  app.route("/admin/test").all(function(req,res,next){
+    testData(req.query.ds).then(function(user){
+      res.end(JSON.stringify(user));
+    },function(error){
+      console.log("Test error",error);
+    });
+  });
+
   app.route("/admin").all(function(req,res,next){
     next();
   }).get(function(req,res,next){
@@ -356,124 +332,97 @@ module.exports=function(configs){
     res.sendFile(__dirname+"/misc/"+req.url.slice(6));
   })
   return app;
-}
-
-function authorizeUser(options){
-  return new Promise(function(fulfill,reject){
-    var apiKey = options.apiKey || simperiumApiKey;
-    var appName = options.appName || simperiumAppName;
-    var user;
-    if(options.username){
-      if(user=simperium.getUserByUsername(options.username)){
-        if(user){
-          fulfill(user);
-        } else{
-          log("user is null for some reason");
-          simperium.authorize(apiKey,appName,options.username,options.password)
-          .then(function(user){
-            authd.addUser(user.userName,user.password,user.userId,appName);
-            authd.addToken(user.userId,user.accessToken);
-            authd.addApp(appName);            
-            fulfill(user);
-          },function(error){
-            reject(error);
-          });
-        }
-      }
-      else{
-        console.log("No record found, checking redis..");
-        //Check redis, then only do actual authorization with Simperium as a last resort
-        authd.authorize(options.username,options.password).then(function(user){
-          fulfill(simperium.init(user.appName,user.userId,user.accessToken));
-        },function(rej){
-          if(rej==1){//Incorrect password
-            reject("Incorrect Username or Password");
-          }
-          else{
-            console.log("No redis auth records, querying Simperium..");
-            simperium.authorize(apiKey,appName,options.username,options.password)
-            .then(function(user){
-                authd.addUser(user.username,user.password,user.userId,appName);
-                authd.addToken(user.userId,user.accessToken);
-                authd.addApp(appName);            
-                fulfill(user);
-              },function(error){
-                reject(error);
-            });
-          }
-        });
-      }
-    } else{
-      reject("Missing username");
-    }
-  });
-}
-function itemKey(userId,bucketName,itemId){
-  return userId+"-"+bucketName+"-"+itemId+"";
-}
-function versionsKey(userId,bucketName){
-    return userId+"-"+bucketName+"~keys";
-}
-function ccidsKey(userId,bucketName){
-    return userId+"-"+bucketName+"~ccids";
-}
-function ccidKey(userId,bucketName,ccid){
-  return "ccid~"+ccid;
-}
-function currentKey(userId,bucketName){
-    return userId+"-"+bucketName+"~current";
-}
-function cacheBucket(userId,bucketName,overwrite){
-  return new Promise(function(fulfill,reject){
-    simperium.getUserById(userId).getBucket(bucketName).getAll()
-    .then(function(response){
-      response.mark=undefined;
-      return cache.cacheIndex(userId,bucketName,response,overwrite)
-    },function(error){
-      console.log("getall error",error);
-    })
-    .then(function(itemLength){
-      simperium.getUserById(userId).getBucket(bucketName).itemCount=itemLength;
-      fulfill();
-    },function(error){
-      log("cacheIndex error",error);
-      reject(error);
-    });
-  });
-}
-function testData(downsync){
-  return new Promise(function(fulfill,reject){
-    var ary=[];
-    cache.db.flushdb().then(function(res){
-      console.log("DB flushed",res);
-    })
-    authorizeUser({username:testUsername
-      ,password:testPassword
-      ,appName:simperiumAppName
-      ,apiKey:simperiumApiKey
-    }).then(function(user){
-      if(downsync!="false"&&downsync!=false){
-        for(var key in user.buckets){
-          ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
-        }
-      }
-      Promise.all(ary).then(function(response){
-        fulfill(user);
+  
+  function itemKey(userId,bucketName,itemId){
+    return userId+"-"+bucketName+"-"+itemId+"";
+  }
+  function versionsKey(userId,bucketName){
+      return userId+"-"+bucketName+"~keys";
+  }
+  function ccidsKey(userId,bucketName){
+      return userId+"-"+bucketName+"~ccids";
+  }
+  function ccidKey(userId,bucketName,ccid){
+    return "ccid~"+ccid;
+  }
+  function currentKey(userId,bucketName){
+      return userId+"-"+bucketName+"~current";
+  }
+  function cacheBucket(userId,bucketName,overwrite){
+    return new Promise(function(fulfill,reject){
+      authd.getUserById(userId).getBucket(bucketName).getAll()
+      .then(function(response){
+        response.mark=undefined;
+        return cache.cacheIndex(userId,bucketName,response,overwrite)
       },function(error){
+        console.log("getall error",error);
+      })
+      .then(function(itemLength){
+        authd.getUserById(userId).getBucket(bucketName).itemCount=itemLength;
+        fulfill();
+      },function(error){
+        console.log("cacheIndex error",error);
         reject(error);
-        log(error);
       });
     });
-  });
-}
-function parseArray(array){
-  hash={};
-  for(i=0;i<array.length;i+=2){
-    val=parseInt(array[i+1]);
-    hash[array[i]]=isNaN(val)?array[i+1]:val;
   }
-  return hash;
-}
-function typeOf(input) {
-	return ({}).toString.call(input).slice(8, -1).toLowerCase();
+  function testData(downsync){
+    return new Promise(function(fulfill,reject){
+      var ary=[];
+      cache.db.flushdb().then(function(res){
+        console.log("DB flushed",res);
+        return authd.authorize(configs.testParams.username,configs.testParams.password,configs.appName,configs.apiKey);
+      })
+      .then(function(user){
+        if(downsync!="false"&&downsync!=false){
+          for(var key in user.buckets){
+            ary.push(cacheBucket(user.userId,user.buckets[key].bucketName,true));
+          }
+        }
+        Promise.all(ary).then(function(response){
+          fulfill(user);
+        },function(error){
+          reject(error);
+          log(error);
+        });
+      });
+    });
+  }
+  function parseArray(array){
+    hash={};
+    for(i=0;i<array.length;i+=2){
+      val=parseInt(array[i+1]);
+      hash[array[i]]=isNaN(val)?array[i+1]:val;
+    }
+    return hash;
+  }
+  function typeOf(input) {
+  	return ({}).toString.call(input).slice(8, -1).toLowerCase();
+  }
+  function passthrough(opts,req,res,callback){
+      //don't capture
+    console.log("Passing along request by "+(req.headers['x-simperium-token']||req.headers['x-simperium-api-key'])+" with options",opts);
+    var options = {
+      hostname: "api.simperium.com",
+      port: 443,
+      method: "GET"
+    };
+    merge(options,opts);
+    remote=https.request(options,function(response){
+      res.statusCode=response.statusCode;
+      res.statusMessage=response.statusMessage;
+      if(response.headers['x-simperium-version']){
+        res.setHeader("X-Simperium-Version",response.headers['x-simperium-version']);
+      }
+      response.pipe(res).on("end",function(){
+        if(typeof callback == "function"){
+          callback();
+        }
+        res.end();
+      });
+    });
+    req.pipe(remote).on("end",function(){
+      remote.end();
+    });
+  }
 }

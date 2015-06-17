@@ -12,27 +12,32 @@ function Auth(configs){
 Auth.prototype.getUserByToken=function(access_token){
   var user;
   if(user=this.simperium.getUserByToken(access_token)){
-    return Promise.fulfill(user);
+    return Promise.resolve(user);
   } else{
     return this.cacheAuth.getUserId(access_token).then(function(userid){
       if(userid){
         if(user=this.simperium.getUserById(userid)){
-          return Promise.fulfill(user);
+          return Promise.resolve(user);
         }
         else{
           return cacheAuth.getUserById(userid).then(function(user){
-            return this.simperium.init(user);
+            return Promise.resolve(this.simperium.init(user));
           },function(error){
-            //Incomplete information, can't continue. Will
-            console.log("Unable to fetch user",userid,"from cache.",userText)
+            //Incomplete information, can't continue. Reject so that the application can pass the request through to simperium instead of attempting to handle it
+            console.log("Unable to fetch user",userid,"from cache.",userText,error);
+            return Promise.reject(error);
           });
         }
       }
       else{
-        return Promise.reject();
+        return Promise.reject("User not found in cache");
       }
     });
   }
+}
+Auth.prototype.getUserById=function(userId){
+  //This retrieves only from Simperium (for performance reasons), because apiAll (and getUserByToken) is always called before getUserById. In theory.
+  return this.simperium.getUserById(userId);
 }
 Auth.prototype.getUsers=function(namesonly){
   if(namesonly){
@@ -51,28 +56,28 @@ Auth.prototype.authorize=function(username,password,appName,apiKey){
   var appName=appName || this.configs.appName;
   var apiKey=apiKey || this.configs.apiKey;
   if(user=this.simperium.getUserByUsername(username)){
-    if(password==user){
+    if(password==user.password){
       return Promise.resolve(user);
     }
     else{
-      return Promise.reject("Invalid credentials");
+      return Promise.reject("Simperium Invalid credentials");
     }
   }
   else{
-    return this.cacheAuth.authorize(username,password).then(function(res){
-      user=this.simperium.init(res);
+    return self.cacheAuth.authorize(username,password).then(function(res){
+      user=self.simperium.init(res);
       return Promise.resolve(user);
     },function(error){
       if(error==1){
-        return Promise.reject("Invalid credentials")
+        return Promise.reject("Cache Invalid credentials")
       }
       else{
         console.info("Credentials not found in redis, querying simperium..");
-        return this.simperium.authorize(apiKey,appName,username,password)
+        return self.simperium.authorize(apiKey,appName,username,password)
         .then(function(res){
-          this.cacheAuth.addUser(username,password,res.userId,appName);
-          this.cacheAuth.addToken(res.userId,res.accessToken);
-          return Promise.fulfill(res);
+          self.cacheAuth.addUser(username,password,res.userId,appName);
+          self.cacheAuth.addToken(res.userId,res.accessToken);
+          return Promise.resolve(res);
         },function(error){
           return Promise.reject(error);
         });

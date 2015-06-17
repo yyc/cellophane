@@ -25,17 +25,21 @@ var request=rp.defaults({
 function authorize(apiKey,appName,username,password){
   return new Promise(function(fulfill,reject){
     if(authenticatedUsers[user2id[username]]){
-      fulfill(user2id[username]);
+      fulfill(authenticatedUsers[user2id[username]]);
     } else{
+      console.log("Makin' a request");
       var user=new User();
       user.username=username;
       user.appName=appName;
-      user.apiKey=apiKey,
-      request.post({
+      user.apiKey=apiKey;
+      var options={
         url: "https://auth.simperium.com/1/"+appName+"/authorize/"
         , headers: {"x-simperium-api-key":apiKey}
         , json: {"username":username,"password":password}
-      }).then(function(response){
+      };
+      console.log(options);
+      request.post(options).then(function(response){
+          user.password=password;
           user.userId=response.userid;
           user.accessToken=response.access_token;
           user2id[username]=response.userid;
@@ -43,11 +47,13 @@ function authorize(apiKey,appName,username,password){
           return user.bucketList();
           }
         ,function(error){
+          console.log("Request error");
           reject(error);
       }).then(function(){
           authenticatedUsers[user.userId]=user;
           fulfill(user);
         },function(error){
+          console.log("bucketlist error",error);
           reject(error);
         });
     }
@@ -74,6 +80,7 @@ function init(appName,userId,accessToken){
     if(appName.username&&appName.userId){
       user2id[appName.username]=appName.userId;
     }
+    return user;
   }
   else{
     user=new User();
@@ -82,8 +89,8 @@ function init(appName,userId,accessToken){
     user.accessToken=accessToken;
     authenticatedUsers[userId]=user;
     token2users[accessToken]=userId;
+    return authenticatedUsers[userId];
   }
-  return authenticatedUsers[userId];
 }
 function getUserByToken(accessToken,userId){
   if(authenticatedUsers[token2users[accessToken]]){
@@ -105,6 +112,7 @@ function getUserById(userId,appName,accessToken){
 function getUserByUsername(userName){
     return authenticatedUsers[user2id[userName]];
 }
+
 function User(userObj){
   var apiKey;
   var appName;
@@ -114,6 +122,12 @@ function User(userObj){
   if(userObj){
     merge(this,userObj);
   }
+  if(this.userId){
+    authenticatedUsers[this.userId]=this;
+    if(this.accessToken){
+      token2users[this.accessToken]=this.userId;
+    }
+  }
 }
 User.prototype.addToken=function(accessToken){
   token2users[accessToken]=this.userId;
@@ -122,7 +136,6 @@ User.prototype.addAuth=function(username){
   this.username=username;
   user2id[username]=this.userId;
 }
-
 User.prototype.bucketList=function(buckets){
   self=this;
   if(buckets){
@@ -275,19 +288,6 @@ Bucket.prototype.requestAllJson=function(options){
 
 
 function makeRequest(options,callback,format){
-  hostname=options.hostname||"api.simperium.com";
-  path = options.path || "/1/miles-secretaries-5c5/authorize/";
-  method = options.method || "POST";
-  headers = options.headers || {};
-  payload = options.payload || "";
-  format = format || "json";
-  var options = {
-    hostname: hostname,
-    port: 443,
-    path: path,
-    method: method,
-    headers: headers
-  };
   if(method=="GET"){
   options.path+="?"+querystring.stringify(payload);
   }

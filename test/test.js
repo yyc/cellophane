@@ -7,13 +7,14 @@ var http=require("http");
 var rp=require("request-promise");
 var configs=require("../config.js");
 var simperium=require("../simperium.js");
+var child=require("child_process");
 var appName=configs.appName;
 var apiKey=configs.apiKey;
-var testBucket=configs.testBucket || "guest";
+var testBucket=configs.testParams.bucket || "guest";
 var accessToken="";
-var testUsername=configs.username;
-var testPassword=configs.password;
-var testObject=configs.testObject;
+var testUsername=configs.testParams.username;
+var testPassword=configs.testParams.password;
+var testObject=configs.testParams.object;
 
 var localHost="http://localhost:5000";
 
@@ -24,8 +25,8 @@ before(function(done){
       done();
     },function(error){
       console.log("Can't find server, starting now.");
-      server=require("../alternate-endpoint");
-      server.start(done);
+      server=child.fork("index.js");
+      setTimeout("done()", 1000);
     });
 });
 
@@ -40,7 +41,7 @@ describe("Ditto Checks",function(){
     it("Remote Call",function(done){
       request
       .post({
-        uri: localHost+"/1/"+appName+"/authorize/"
+        uri: "https://auth.simperium.com/1/"+appName+"/authorize/"
         , headers:{"X-Simperium-API-Key":apiKey}
         , json:{username:testUsername,password:testPassword}
       })

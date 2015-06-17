@@ -77,5 +77,5 @@ function startLast(){
   //HTTP Endpoint. Start last, only after control and cache pages have started
   httpListener.listen(process.env.port,function(){
     console.log("Cellophane started on port",process.env.port);
-  })
+  });
 }

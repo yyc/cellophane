@@ -50,7 +50,9 @@ Auth.prototype.getUserById=function(userId){
 }
 Auth.prototype.addUser=function(username,password,userId,appName){
   this.db.multi();
-this.db.hset("~users",username,JSON.stringify({password:password,userId:userId,appName:appName}));
+  this.db.hset("~users",username,JSON.stringify({
+    password:password,userId:userId,appName:appName
+  }));
   this.db.hset("~id2names",userId,username);
   return this.db.exec();
 }
@@ -67,7 +69,7 @@ Auth.prototype.authorize=function(username,password){
       var json=JSON.parse(res);
       if(password==json.password){
         json.username=username;
-        return self.db.hget("~userTokens",userId).then(function(accessToken){
+        return self.db.hget("~userTokens",json.userId).then(function(accessToken){
           json.accessToken=accessToken;
           return Promise.resolve(json);
         });
@@ -83,9 +85,10 @@ Auth.prototype.authorize=function(username,password){
 }
 Auth.prototype.addToken=function(userId,token){
   var self=this;
-  return this.db.hset("~accessTokens",token,userId).then(function(){
-      return self.db.hset("~userTokens",userId,token);
-    });
+  this.db.multi();
+  this.db.hset("~accessTokens",token,userId);
+  this.db.hset("~userTokens",userId,token);
+  return this.db.exec();
 }
 Auth.prototype.getToken=function(userId){
   return this.db.hget("~userTokens",userId);
