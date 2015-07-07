@@ -1,5 +1,3 @@
-//It's St. Patrick's Day!
-
 var program=require("commander");
 var net=require("net");
 var child_process=require("child_process");
@@ -63,22 +61,54 @@ function start(){
   if(configs.redis){
     configs.redisOptions=configs.redis;
   }
-  
+
   var app=require("./http-endpoint.js")(configs,cache,authd);
   console.log("STARTING NOW");
   httpListener=http.Server(app);
-  var httpEndpoint=child_process.fork("admin.js");
-  httpEndpoint.on("data",function(data){
+  var admin=child_process.fork("./admin.js");
+  admin.on("data",function(data){
     console.log("dayta here",data);
   });
-  httpEndpoint.on("start",function(message){
-    httpEndpoint.send({type:"redisOptions",d:configs.redisOptions});
-    httpEndpoint.send("start",server);
+  admin.send({type:"redisOptions",d:configs.redisOptions});
+  admin.send("start",httpListener);
+  authd.getApps().then(function(res){
+    res.forEach(function(appName){
+      interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
+      console.log("Installed handlers on /sock/1/"+appName);
+    });
+    return authd.getUsers(false);
+  }).then(function(users){
+    if(users != null){
+      Object.keys(users).forEach(function(key){
+        var json=JSON.parse(users[key]);
+        var user;
+        authd.getToken(json.userId).then(function(accessToken){
+          user=authd.simperium.init(json.appName,json.userId,accessToken);
+          user.addAuth(key);
+          return cache.bucketList(json.userId);
+        }).then(function(bucketList){
+          user.bucketList(bucketList);
+          bucketCounts=[];
+          bucketList.forEach(function(bucket){
+            bucketCounts.push(cache.bucketCount(user.userId,bucket).then(function(count){
+              user.getBucket(bucket).itemCount=count[1];
+              return Promise.resolve(count);
+            }));
+            return Promise.all(bucketCounts)
+          });
+        });
+      });
+    }
+    else{
+      console.log("No user data stored in redis");
+    }
   });
-  
   startLast();
 }
-  
+
+
+
+
 function startLast(){
   //HTTP Endpoint. Start last, only after control and cache pages have started
   httpListener.listen(process.env.port,function(){

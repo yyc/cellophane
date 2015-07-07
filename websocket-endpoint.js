@@ -1,3 +1,6 @@
+var sockjs=require("sockjs");
+var sockClient=require("sockjs-client");
+
 module.exports=function(configs,cache,authd){
   //SocketJS to handle WebSocket API calls
   var interceptor = sockjs.createServer({ sockjs_url: 'http://cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js'});
@@ -35,7 +38,7 @@ module.exports=function(configs,cache,authd){
                 //authenticate and select bucket
                 var json=JSON.parse(data);
                 json.name=json.name.toLowerCase();
-                if(user=simperium.getUserByToken(json.token)){
+                if(user=authd.getUserByToken(json.token)){
                   clientId=json.clientid
                   conn.write(heads[0]+":auth:"+user.username);
                   if(isNaN(channel)){
@@ -199,39 +202,5 @@ module.exports=function(configs,cache,authd){
           bucket.exit();
         })
       });
-  });
-  
-  
-  authd.getApps().then(function(res){
-    res.forEach(function(appName){
-      interceptor.installHandlers(httpListener, {prefix:"/sock/1/"+appName});
-      console.log("Installed handlers on /sock/1/"+appName);
-    });
-    return authd.getUsers(false);
-  }).then(function(users){
-    if(users != null){
-      Object.keys(users).forEach(function(key){
-        var json=JSON.parse(users[key]);
-        var user;
-        authd.getToken(json.userId).then(function(accessToken){
-          user=simperium.init(json.appName,json.userId,accessToken);
-          user.addAuth(key);
-          return cache.bucketList(json.userId);
-        }).then(function(bucketList){
-          user.bucketList(bucketList);
-          bucketCounts=[];
-          bucketList.forEach(function(bucket){
-            bucketCounts.push(cache.bucketCount(user.userId,bucket).then(function(count){
-              user.getBucket(bucket).itemCount=count[1];
-              return Promise.resolve(count);
-            }));
-            return Promise.all(bucketCounts)
-          });
-        });
-      });
-    }
-    else{
-      console.log("No user data stored in redis");
-    }
   });
 }

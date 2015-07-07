@@ -7,6 +7,7 @@ function Auth(configs){
   this.simperium=simperium;
   this.cacheAuth=new cache.Auth(configs.redisOptions);
   this.configs=configs;
+  this.db=this.cacheAuth.db;
 }
 
 Auth.prototype.getUserByToken=function(access_token){
@@ -84,6 +85,12 @@ Auth.prototype.authorize=function(username,password,appName,apiKey){
       }
     })
   }
+}
+Auth.prototype.getApps=function(){
+  return this.cacheAuth.getApps();
+}
+Auth.prototype.getToken=function(userId){
+  return this.cacheAuth.getToken(userId);
 }
 Auth.prototype.addToken=function(userId,token){
   var self=this;

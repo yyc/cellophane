@@ -2,9 +2,11 @@ var express=require("express");
 var https=require("https");
 var simperium;
 var uuid=require("node-uuid");
+var merge=require("./lib/merge_recursively");
 
 module.exports=function(configs,cache,authd){
   var app=express();
+
   //Getting all auth requests and /buckets (since they match the same route pattern
   app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
     req.appName=req.params.appName;
@@ -72,6 +74,8 @@ module.exports=function(configs,cache,authd){
     res.statusCode=501;
     res.end("501 Not Implemented");
     });
+
+
   
   //Requests to api.simperium.com
   //Middleware
@@ -86,7 +90,7 @@ module.exports=function(configs,cache,authd){
         if(user){
           req.user=user;
           if(req.params.bucket){
-            req.bucket=req.user.getBucket(req.params.bucket);
+            req.bucket=user.getBucket(req.params.bucket);
           }
           next();
         }
@@ -324,9 +328,6 @@ module.exports=function(configs,cache,authd){
   }).get(function(req,res,next){
     res.sendFile(__dirname+"/index.html");
   });
-  app.route("/misc/*").get(function(req,res,next){
-    res.sendFile(__dirname+"/misc/"+req.url.slice(6));
-  })
   app.route("/sock/1/:app_id/info").get(function(req,res,next){
       //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
     prefixUrl=req.url.slice(0,-5);

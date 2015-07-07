@@ -9,6 +9,8 @@ var redis=require("then-redis");
 var simperium=require("./simperium");
 var cachejs=require("./cache");
 
+process.send("started");
+
 process.on("message",function(message,httpListener){
   if(message=="http"){
     var io=require("socket.io")(httpListener);
