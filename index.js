@@ -3,9 +3,9 @@
 var program=require("commander");
 var net=require("net");
 var child_process=require("child_process");
-var forever=require("forever-monitor");
 var http=require("http");
-
+var cachejs=require("./cache");
+var Auth=require("./auth");
 
 //Startup options
 program
@@ -45,10 +45,17 @@ httpListener.on("error",function(error){
   }
   httpListener.listen(process.env.port);
 });
+
 httpListener.listen(process.env.port,success);
+
+var cache=new cachejs.Cache({redisOptions:configs.redisOptions});
+var authd=new Auth(configs.redisOptions);
+
+
 function success(){
   httpListener.close(start);
 }
+
 function start(){
   //manage other config stuff
   console.log("Using port "+process.env.port+" with configuration",configs);
@@ -57,14 +64,13 @@ function start(){
     configs.redisOptions=configs.redis;
   }
   
-  var app=require("./http-endpoint.js")(configs);
+  var app=require("./http-endpoint.js")(configs,cache,authd);
   console.log("STARTING NOW");
-
   httpListener=http.Server(app);
   var httpEndpoint=child_process.fork("admin.js");
   httpEndpoint.on("data",function(data){
     console.log("dayta here",data);
-  })
+  });
   httpEndpoint.on("start",function(message){
     httpEndpoint.send({type:"redisOptions",d:configs.redisOptions});
     httpEndpoint.send("start",server);

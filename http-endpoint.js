@@ -1,13 +1,9 @@
 var express=require("express");
 var https=require("https");
 var simperium;
-var cachejs=require("./cache");
-var Auth=require("./auth");
 var uuid=require("node-uuid");
 
-module.exports=function(configs){
-  var cache=new cachejs.Cache({redisOptions:configs.redisOptions});
-  var authd=new Auth(configs.redisOptions);
+module.exports=function(configs,cache,authd){
   var app=express();
   //Getting all auth requests and /buckets (since they match the same route pattern
   app.route("/1/:appName/:method/").all(function(req,res,next){//Main router
@@ -90,7 +86,7 @@ module.exports=function(configs){
         if(user){
           req.user=user;
           if(req.params.bucket){
-            req
+            req.bucket=req.user.getBucket(req.params.bucket);
           }
           next();
         }
@@ -240,7 +236,7 @@ module.exports=function(configs){
     })
   }
   app.route("/1/:appName/:bucket/index").all(apiAll).get(function(req,res,next){
-    if(typeof req.user.itemCount=="number"){
+    if(typeof req.bucket.itemCount=="number"){
       cache.getIndex(req.user.userId,req.params.bucket,req.query).then(function(response){
         res.statusCode=200;
         res.end(JSON.stringify({
@@ -254,7 +250,7 @@ module.exports=function(configs){
       });
     }else{
       options=req.query;
-      req.user.getBucket(req.params.bucket).index(options)
+      req.bucket.index(options)
       .then(function(response){
         res.statusCode=200;
         res.end(JSON.stringify(response));
@@ -331,6 +327,12 @@ module.exports=function(configs){
   app.route("/misc/*").get(function(req,res,next){
     res.sendFile(__dirname+"/misc/"+req.url.slice(6));
   })
+  app.route("/sock/1/:app_id/info").get(function(req,res,next){
+      //Hacky way to imitate the /info handshake. Basically just tells the client that it's okay to connect to any random path under this one. If there are a significant number of users then I'd have to actually keep track of the entropy to prevent colliding sockets.
+    prefixUrl=req.url.slice(0,-5);
+      res.end(JSON.stringify({"websocket":true,"origins":["*:*"],"cookie_needed":false,"entropy":(Math.random()*1000000000)}));
+  });
+
   return app;
   
   function itemKey(userId,bucketName,itemId){
